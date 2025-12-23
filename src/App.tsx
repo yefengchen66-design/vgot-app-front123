@@ -372,7 +372,7 @@ const TaskCard = ({ task, setTasks }: { task: Task, setTasks: React.Dispatch<Rea
   );
 };
 
-const HyperSellView = () => {
+const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
   const [activeTab, setActiveTab] = useState<"text" | "image" | "enhance">("text");
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -388,13 +388,29 @@ const HyperSellView = () => {
   const [prompt, setPrompt] = useState("");
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [duration, setDuration] = useState("10");
-  const [hd, setHd] = useState(false); // New: HD toggle
+  const [quality, setQuality] = useState("small");
   const [loading, setLoading] = useState(false);
   const [polling, setPolling] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timersRef = useRef(new Map<string, { intervalId: any; startAt: number }>());
+
+  const checkVideoDuration = (file: File): Promise<number | null> => {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.onloadedmetadata = () => {
+        URL.revokeObjectURL(video.src);
+        resolve(video.duration);
+      };
+      video.onerror = () => {
+        URL.revokeObjectURL(video.src);
+        resolve(null);
+      };
+      video.src = URL.createObjectURL(file);
+    });
+  };
 
   const PAGE_LIMITS = { text: 5, image: 5, enhance: 3 };
 
@@ -550,6 +566,8 @@ const HyperSellView = () => {
           }
 
           stopPolling();
+          // Refresh user credits after success
+          onRefreshUser?.();
         } else if (status === "failed" || status === "error" || status === "timeout" || status === "failure" || status === "canceled") {
           const errorMsg = data.error || data.message || data.fail_reason || data.data?.error || data.data?.message || data.data?.fail_reason || "Generation failed";
           setTasks(prev => prev.map(t => t.id === localId ? { ...t, status: "failed", error: errorMsg } : t));
@@ -612,12 +630,11 @@ const HyperSellView = () => {
       aspect_ratio: aspectRatio,
       duration: Number(duration),
       model: "sora-2",
-      hd,
     } : (activeTab === "image" ? {
       prompt,
       aspect_ratio: aspectRatio,
       duration: Number(duration),
-      size: "small"
+      size: quality
     } : {});
 
     const newTask: Task = {
@@ -653,6 +670,15 @@ const HyperSellView = () => {
         });
       } else {
         // Enhance
+        // Step 0: Check duration
+        const durationSec = await checkVideoDuration(uploadedFile!);
+        if (durationSec === null || durationSec > 15.25) {
+          alert("Video duration must be 15 seconds or less");
+          setLoading(false);
+          setTasks(prev => prev.filter(t => t.id !== localId));
+          return;
+        }
+
         // Step 1: Upload file to RunningHub
         const formData = new FormData();
         formData.append("file", uploadedFile!);
@@ -732,47 +758,64 @@ const HyperSellView = () => {
           </label>
 
           {activeTab === "image" || activeTab === "enhance" ? (
-            <div
-              onClick={() => !uploadedFile && fileInputRef.current?.click()}
-              className={cn(
-                "h-48 w-full border-2 border-dashed border-cyan-500/30 bg-slate-900/50 rounded-lg flex flex-col items-center justify-center group transition-all relative overflow-hidden",
-                !uploadedFile ? "cursor-pointer hover:border-cyan-400 hover:bg-slate-800/50" : ""
-              )}
-            >
-              {previewUrl ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
-                  {uploadedFile?.type.startsWith("video/") ? (
-                    <video src={previewUrl} className="h-full w-full object-contain" autoPlay loop muted />
-                  ) : (
-                    <img src={previewUrl} alt="Preview" className="h-full w-full object-contain" />
-                  )}
-                  <button
-                    onClick={handleClearUpload}
-                    className="absolute top-3 right-3 p-1.5 bg-black/50 rounded-full text-white hover:bg-black/80 z-10"
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center">
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(6,182,212,0.1)_0%,_transparent_70%)] opacity-0 group-hover:opacity-100 transition-opacity" />
-                  <Upload
-                    className="text-cyan-400 mb-3 group-hover:scale-110 transition-transform shadow-[0_0_15px_rgba(6,182,212,0.5)] rounded-full p-1"
-                    size={32}
+            <>
+              <div
+                onClick={() => !uploadedFile && fileInputRef.current?.click()}
+                className={cn(
+                  "h-48 w-full border-2 border-dashed border-cyan-500/30 bg-slate-900/50 rounded-lg flex flex-col items-center justify-center group transition-all relative overflow-hidden",
+                  !uploadedFile ? "cursor-pointer hover:border-cyan-400 hover:bg-slate-800/50" : ""
+                )}
+              >
+                {previewUrl ? (
+                  <>
+                    <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
+                      {uploadedFile?.type.startsWith("video/") ? (
+                        <video src={previewUrl} className="h-full w-full object-contain" autoPlay loop muted />
+                      ) : (
+                        <img src={previewUrl} alt="Preview" className="h-full w-auto max-w-none object-contain" />
+                      )}
+                    </div>
+                    <button
+                      onClick={handleClearUpload}
+                      className="absolute top-2 right-2 p-1.5 bg-black/60 rounded-full text-white hover:bg-black/80 z-30 shadow-lg border border-white/20 transition-all hover:scale-110 active:scale-95"
+                    >
+                      <X size={16} />
+                    </button>
+                  </>
+                ) : (
+                  <div className="flex flex-col items-center justify-center">
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(6,182,212,0.1)_0%,_transparent_70%)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <Upload
+                      className="text-cyan-400 mb-3 group-hover:scale-110 transition-transform shadow-[0_0_15px_rgba(6,182,212,0.5)] rounded-full p-1"
+                      size={32}
+                    />
+                    <span className="text-slate-400 text-sm font-medium">
+                      Tap to Upload
+                    </span>
+                  </div>
+                )}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  style={{ display: 'none' }}
+                  accept="image/*,video/*"
+                  onChange={handleFileUpload}
+                />
+              </div>
+              {activeTab === "image" && (
+                <div className="space-y-2 mt-4">
+                  <label className="text-[10px] uppercase tracking-widest text-cyan-400 font-bold">
+                    Prompt Input
+                  </label>
+                  <textarea
+                    className="w-full h-32 bg-slate-950/50 border border-slate-700 rounded-lg p-4 text-white resize-none focus:border-cyan-400 focus:shadow-[0_0_15px_rgba(6,182,212,0.2)] outline-none transition-all placeholder:text-slate-600"
+                    placeholder="Describe the video you want to generate in detail..."
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
                   />
-                  <span className="text-slate-400 text-sm font-medium">
-                    Tap to Upload
-                  </span>
                 </div>
               )}
-              <input
-                type="file"
-                ref={fileInputRef}
-                style={{ display: 'none' }}
-                accept="image/*,video/*"
-                onChange={handleFileUpload}
-              />
-            </div>
+            </>
           ) : (
             <textarea
               className="w-full h-32 bg-slate-950/50 border border-slate-700 rounded-lg p-4 text-white resize-none focus:border-cyan-400 focus:shadow-[0_0_15px_rgba(6,182,212,0.2)] outline-none transition-all placeholder:text-slate-600"
@@ -816,6 +859,21 @@ const HyperSellView = () => {
                 </select>
               </div>
             </div>
+            {activeTab === "image" && (
+              <div className="space-y-2 mt-4">
+                <label className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
+                  Resolution (SIZE)
+                </label>
+                <select
+                  className="w-full bg-slate-900 border border-slate-700 text-white text-sm rounded-md p-2.5 outline-none focus:border-cyan-500/50"
+                  value={quality}
+                  onChange={(e) => setQuality(e.target.value)}
+                >
+                  <option value="small">标清 (small)</option>
+                  <option value="large">高清 (large)</option>
+                </select>
+              </div>
+            )}
 
 
           </>
@@ -882,7 +940,7 @@ const HyperSellView = () => {
           </div>
         )}
       </div>
-    </div>
+    </div >
   );
 };
 
@@ -2565,6 +2623,21 @@ export default function App() {
   // For dev we proxy /api to 127.0.0.1:8000 via Vite; for prod use VITE_API_BASE_URL
   const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || ""; // empty => same-origin with dev proxy
 
+  const fetchUser = async () => {
+    const t = localStorage.getItem("access_token");
+    if (!t) { setUser(null); return; }
+    try {
+      const resp = await fetch(`${API_BASE}/api/user/me`, {
+        headers: { Authorization: `Bearer ${t}` },
+      });
+      if (!resp.ok) throw new Error("failed to fetch user");
+      const data = await resp.json();
+      setUser(data as UserProfile);
+    } catch (e) {
+      console.warn("fetch /api/user/me error", e);
+    }
+  };
+
   const navigate = (tab: string) => {
     const protectedTabs = ["scripts", "hypersell", "superip", "history"];
     if (!isLoggedIn && protectedTabs.includes(tab)) {
@@ -2690,23 +2763,11 @@ export default function App() {
 
   useEffect(() => {
     // Fetch current user when logged in
-    const t = token;
-    if (!t) { setUser(null); return; }
-    const controller = new AbortController();
-    (async () => {
-      try {
-        const resp = await fetch(`${API_BASE}/api/user/me`, {
-          headers: { Authorization: `Bearer ${t}` },
-          signal: controller.signal,
-        });
-        if (!resp.ok) throw new Error("failed to fetch user");
-        const data = await resp.json();
-        setUser(data as UserProfile);
-      } catch (e) {
-        console.warn("fetch /api/user/me error", e);
-      }
-    })();
-    return () => controller.abort();
+    if (token) {
+      fetchUser();
+    } else {
+      setUser(null);
+    }
   }, [token]);
 
   return (
@@ -2745,7 +2806,7 @@ export default function App() {
             <WorkspaceView onNavigate={navigate as any} />
           )}
           {activeTab === "scripts" && <ScriptsView />}
-          {activeTab === "hypersell" && <HyperSellView />}
+          {activeTab === "hypersell" && <HyperSellView onRefreshUser={fetchUser} />}
           {activeTab === "superip" && <SuperIpView />}
           {activeTab === "history" && <HistoryView />}
           {activeTab === "login" && (
