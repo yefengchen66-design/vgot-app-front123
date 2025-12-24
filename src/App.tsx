@@ -33,6 +33,7 @@ import {
   FileText,
   Film,
   PenTool,
+  Send,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { clsx, type ClassValue } from "clsx";
@@ -344,7 +345,7 @@ const TaskCard = ({ task, setTasks }: { task: Task, setTasks: React.Dispatch<Rea
             {isRunning || isPersisting ? (
               <>
                 <p className="text-[10px] text-cyan-400 font-bold uppercase tracking-widest animate-pulse text-center">
-                  {isPersisting ? "Persisting..." : `Generating ${task.progress}%`}
+                  {isPersisting ? "Persisting..." : task.type === "enhance" ? "Generating..." : `Generating ${task.progress}%`}
                 </p>
               </>
             ) : isFailed ? (
@@ -841,7 +842,6 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
                 >
                   <option value="9:16">9:16 (Mobile)</option>
                   <option value="16:9">16:9 (Landscape)</option>
-                  <option value="1:1">1:1 (Square)</option>
                 </select>
               </div>
               <div className="space-y-2">
@@ -853,7 +853,6 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
                   value={duration}
                   onChange={(e) => setDuration(e.target.value)}
                 >
-                  <option value="5">5 Seconds</option>
                   <option value="10">10 Seconds</option>
                   <option value="15">15 Seconds</option>
                 </select>
@@ -1008,7 +1007,7 @@ const SuperIpView = () => {
                 </div>
                 <span
                   className={cn(
-                    "text-[10px] uppercase font-bold tracking-wider",
+                    "text-[8px] uppercase font-bold tracking-wider",
                     isActive
                       ? "text-cyan-400"
                       : "text-slate-600",
@@ -1032,84 +1031,65 @@ const SuperIpView = () => {
             animate={{ opacity: 1, x: 0 }}
             className="space-y-6 pb-2"
           >
-            {/* Selected Character Preview */}
-            <div className="flex items-center gap-3 bg-slate-900/50 p-3 rounded-xl border border-slate-800 backdrop-blur-sm shadow-sm">
-              <div className="w-12 h-12 rounded-lg border border-cyan-500/50 p-0.5 relative shrink-0">
-                <img
-                  src="https://images.unsplash.com/photo-1762237798212-bcc000c00891?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwb3J0cmFpdCUyMG9mJTIwYSUyMGRvY3RvciUyMHByb2Zlc3Npb25hbCUyMGhlYWRzaG90fGVufDF8fHx8MTc2NjAzMjAxM3ww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
-                  className="w-full h-full object-cover rounded"
-                  alt="Selected"
-                />
-                <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-cyan-500 rounded-full flex items-center justify-center border-2 border-slate-900">
-                  <Check
-                    size={10}
-                    className="text-black stroke-[3]"
-                  />
+            {/* Three Upload Boxes in a Row - Container */}
+            <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4">
+              <div className="flex items-center gap-3">
+                {/* Group: Character & Audio with Divider */}
+                <div className="flex items-center">
+                  {/* Upload Box 1 - Character */}
+                  <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
+                    <ImageIcon size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
+                    <span className="text-[10px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap scale-[0.5] origin-center">
+                      上传角色
+                    </span>
+                  </div>
+
+                  {/* Vertical Divider */}
+                  <div className="w-[2px] h-10 bg-slate-600 mx-3 shrink-0 self-center" />
+
+                  {/* Upload Box 2 - Audio */}
+                  <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
+                    <Volume2 size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
+                    <span className="text-[10px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap scale-[0.5] origin-center">
+                      上传音频
+                    </span>
+                  </div>
                 </div>
+
+                <div className="flex-1" />
+
+                {/* Upload Box 3 - Video */}
+                <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
+                  <Film size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
+                  <span className="text-[10px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap scale-[0.5] origin-center">
+                    上传视频
+                  </span>
+                </div>
+
+                {/* Send Icon Button */}
+                <button className="text-cyan-400 hover:text-cyan-300 transition-all p-1">
+                  <Send size={24} />
+                </button>
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider mb-0.5">
-                  Current Selection
-                </div>
-                <div className="text-sm font-bold text-white truncate">
-                  Professional Doctor
-                </div>
-              </div>
-              <button className="px-3 py-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 text-xs font-bold border border-cyan-500/50 hover:bg-cyan-500/20 transition-colors">
-                Edit
-              </button>
             </div>
 
-            <div className="space-y-3">
-              <label className="text-sm font-medium text-slate-300">
-                Choose Character Base
-              </label>
-              <div className="grid grid-cols-2 gap-4">
-                {[1, 2, 3, 4].map((i) => (
-                  <div
-                    key={i}
-                    onClick={() => setSelectedBase(i)}
-                    className={cn(
-                      "aspect-[3/4] rounded-lg border transition-all cursor-pointer relative overflow-hidden group",
-                      selectedBase === i
-                        ? "bg-slate-800 border-cyan-500 shadow-[0_0_15px_rgba(6,182,212,0.3)]"
-                        : "bg-slate-800 border-slate-700 hover:border-cyan-500",
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        "absolute inset-0 flex items-center justify-center font-mono text-xs",
-                        selectedBase === i
-                          ? "text-cyan-400"
-                          : "text-slate-600 group-hover:text-cyan-400",
-                      )}
-                    >
-                      Model {i}
-                    </div>
-                    {selectedBase === i && (
-                      <div className="absolute top-2 right-2 w-4 h-4 bg-cyan-500 rounded-full flex items-center justify-center">
-                        <Check
-                          size={10}
-                          className="text-black stroke-[3]"
-                        />
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+            {/* Open Gallery Button */}
+            <div className="w-full py-2 border border-slate-700 rounded-lg bg-slate-950/30 text-slate-400 text-[10px] flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors cursor-pointer hover:text-cyan-400 hover:border-cyan-500/50 group">
+              <ImageIcon size={14} className="group-hover:text-cyan-400 transition-colors" />
+              <span className="font-medium group-hover:text-cyan-400 transition-colors">打开图库</span>
             </div>
 
             {/* Workbench Input */}
             {/* Workbench Input */}
             <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 space-y-4">
               <div className="space-y-2">
-                <label className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
+                <label className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
                   Enter Prompt
                 </label>
                 <textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  className="w-full h-32 bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-xs text-white resize-none outline-none focus:border-cyan-500/50 placeholder:text-slate-600 transition-all"
+                  className="w-full h-32 bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-[10px] text-white resize-none outline-none focus:border-cyan-500/50 placeholder:text-slate-600 transition-all"
                   placeholder="Describe the character you want..."
                 />
               </div>
@@ -1117,7 +1097,7 @@ const SuperIpView = () => {
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={() => setPrompt("")}
-                  className="px-4 py-2 rounded-lg border border-slate-700 text-slate-400 text-xs font-bold hover:bg-slate-800 transition-colors"
+                  className="px-4 py-2 rounded-lg border border-slate-700 text-slate-400 text-[10px] font-bold hover:bg-slate-800 transition-colors"
                 >
                   Clear
                 </button>
@@ -1127,7 +1107,7 @@ const SuperIpView = () => {
                       "https://images.unsplash.com/photo-1686543971025-15aa01b5f7c7?w=1080",
                     )
                   }
-                  className="flex-1 py-2 text-xs font-bold text-cyan-400 border border-cyan-500/50 rounded-lg hover:bg-cyan-500/10 hover:shadow-[0_0_15px_rgba(6,182,212,0.3)] transition-all flex items-center justify-center gap-2 uppercase tracking-wide"
+                  className="flex-1 py-2 text-[10px] font-bold text-cyan-400 border border-cyan-500/50 rounded-lg hover:bg-cyan-500/10 hover:shadow-[0_0_15px_rgba(6,182,212,0.3)] transition-all flex items-center justify-center gap-2 uppercase tracking-wide"
                 >
                   <Zap size={14} /> Generate
                 </button>
@@ -1138,7 +1118,7 @@ const SuperIpView = () => {
             {generatedImage ? (
               <div className="bg-slate-900/40 border border-slate-800 rounded-xl min-h-[240px] p-2 flex flex-col">
                 <div className="flex justify-between items-center mb-2 px-2">
-                  <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
+                  <span className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
                     Result
                   </span>
                 </div>
@@ -1152,10 +1132,10 @@ const SuperIpView = () => {
               </div>
             ) : (
               <div className="bg-slate-900/40 border border-slate-800 rounded-xl min-h-[240px] flex flex-col items-center justify-center p-6 text-center space-y-3">
-                <span className="text-xs font-bold uppercase tracking-[0.2em] text-white">
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">
                   Result
                 </span>
-                <p className="text-xs text-slate-500 font-medium">
+                <p className="text-[10px] text-slate-500 font-medium">
                   Generated image will appear here
                 </p>
               </div>
@@ -1185,10 +1165,10 @@ const SuperIpView = () => {
                 </div>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider mb-0.5">
+                <div className="text-[8px] text-cyan-400 font-bold uppercase tracking-wider mb-0.5">
                   Current Selection
                 </div>
-                <div className="text-xs font-bold text-white truncate">
+                <div className="text-[10px] font-bold text-white truncate">
                   Professional Doctor
                 </div>
               </div>
@@ -1198,14 +1178,14 @@ const SuperIpView = () => {
                     size={12}
                     className="text-slate-500 group-hover:text-cyan-400"
                   />
-                  <span className="text-[9px] font-bold text-slate-500 group-hover:text-cyan-400 uppercase tracking-wider">
+                  <span className="text-[8px] font-bold text-slate-500 group-hover:text-cyan-400 uppercase tracking-wider">
                     Audio
                   </span>
                 </div>
               </div>
               <button
                 onClick={() => setStep(1)}
-                className="px-3 py-1.5 rounded-lg text-cyan-400 text-[10px] font-bold hover:bg-cyan-500/10 transition-colors uppercase tracking-wider border border-transparent hover:border-cyan-500/30"
+                className="px-3 py-1.5 rounded-lg text-cyan-400 text-[8px] font-bold hover:bg-cyan-500/10 transition-colors uppercase tracking-wider border border-transparent hover:border-cyan-500/30"
               >
                 Edit
               </button>
@@ -1217,14 +1197,14 @@ const SuperIpView = () => {
                 <Volume2 size={20} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider mb-0.5">
+                <div className="text-[8px] text-cyan-400 font-bold uppercase tracking-wider mb-0.5">
                   Generated Audio
                 </div>
-                <div className="text-xs font-bold text-white truncate">
+                <div className="text-[10px] font-bold text-white truncate">
                   speech_20251022.mp3
                 </div>
               </div>
-              <button className="px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[10px] font-bold hover:bg-cyan-500/20 transition-colors uppercase tracking-wider flex items-center gap-1.5 hover:shadow-[0_0_10px_rgba(6,182,212,0.2)]">
+              <button className="px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[8px] font-bold hover:bg-cyan-500/20 transition-colors uppercase tracking-wider flex items-center gap-1.5 hover:shadow-[0_0_10px_rgba(6,182,212,0.2)]">
                 <Check size={10} strokeWidth={3} /> Use
               </button>
             </div>
@@ -1233,14 +1213,14 @@ const SuperIpView = () => {
             <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 space-y-4">
               {/* Voice Waveform */}
               <div className="space-y-2">
-                <label className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
+                <label className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
                   Voice Waveform
                 </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     placeholder="Enter Voice ID..."
-                    className="flex-1 bg-slate-950/50 border border-slate-700 rounded-lg px-3 text-xs text-white outline-none focus:border-cyan-500/50 placeholder:text-slate-600 transition-all h-9"
+                    className="flex-1 bg-slate-950/50 border border-slate-700 rounded-lg px-3 text-[10px] text-white outline-none focus:border-cyan-500/50 placeholder:text-slate-600 transition-all h-9"
                   />
                   <button className="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-cyan-400 hover:bg-slate-700 hover:border-cyan-500/50 transition-colors">
                     <Play size={14} />
@@ -1248,7 +1228,7 @@ const SuperIpView = () => {
                   <button className="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 hover:bg-slate-700 hover:text-white transition-colors">
                     <X size={14} />
                   </button>
-                  <button className="px-3 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-cyan-400 hover:bg-slate-700 hover:border-cyan-500/50 transition-colors">
+                  <button className="px-3 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-cyan-400 hover:bg-slate-700 hover:border-cyan-500/50 transition-colors">
                     Match
                   </button>
                 </div>
@@ -1256,7 +1236,7 @@ const SuperIpView = () => {
 
               {/* Select Voice */}
               <div className="space-y-2">
-                <label className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
+                <label className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
                   Select Voice
                 </label>
                 <button className="w-full py-3 bg-slate-950/50 border border-slate-700 rounded-lg flex items-center justify-center gap-2 text-slate-300 hover:text-white hover:border-cyan-500/50 transition-colors group">
@@ -1264,7 +1244,7 @@ const SuperIpView = () => {
                     size={16}
                     className="text-slate-500 group-hover:text-cyan-400 transition-colors"
                   />
-                  <span className="text-xs font-bold">
+                  <span className="text-[10px] font-bold">
                     Select Voice Model
                   </span>
                 </button>
@@ -1272,7 +1252,7 @@ const SuperIpView = () => {
 
               {/* Voice Cloning */}
               <div className="space-y-2">
-                <label className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
+                <label className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
                   Voice Cloning
                 </label>
                 <div className="h-24 border border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center bg-slate-950/50 hover:border-cyan-500/50 transition-colors cursor-pointer group relative overflow-hidden">
@@ -1281,10 +1261,10 @@ const SuperIpView = () => {
                     className="text-slate-500 group-hover:text-cyan-400 mb-2 transition-colors"
                     size={16}
                   />
-                  <span className="text-xs text-slate-400 group-hover:text-slate-300 transition-colors">
+                  <span className="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">
                     Select File (mp3/wav/m4a)
                   </span>
-                  <span className="text-[10px] text-slate-600 mt-1">
+                  <span className="text-[8px] text-slate-600 mt-1">
                     10s~300s, ≤20MB
                   </span>
                 </div>
@@ -1292,7 +1272,7 @@ const SuperIpView = () => {
 
               {/* Input Text */}
               <div className="space-y-2">
-                <label className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
+                <label className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
                   Input Text
                 </label>
                 <div className="relative group">
@@ -1301,11 +1281,11 @@ const SuperIpView = () => {
                     onChange={(e) =>
                       setVoiceText(e.target.value)
                     }
-                    className="w-full h-32 bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-xs text-white resize-none outline-none focus:border-cyan-500/50 placeholder:text-slate-600 transition-all"
+                    className="w-full h-32 bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-[10px] text-white resize-none outline-none focus:border-cyan-500/50 placeholder:text-slate-600 transition-all"
                     placeholder="Enter text to convert to speech..."
                     maxLength={3500}
                   />
-                  <span className="absolute bottom-2 right-2 text-[10px] text-slate-600">
+                  <span className="absolute bottom-2 right-2 text-[8px] text-slate-600">
                     {voiceText.length}/3500
                   </span>
                 </div>
@@ -1315,12 +1295,12 @@ const SuperIpView = () => {
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={() => setVoiceText("")}
-                  className="px-4 py-2 rounded-lg border border-slate-700 text-slate-400 text-xs font-bold hover:bg-slate-800 transition-colors"
+                  className="px-4 py-2 rounded-lg border border-slate-700 text-slate-400 text-[10px] font-bold hover:bg-slate-800 transition-colors"
                 >
                   Clear
                 </button>
                 <NeonButton
-                  className="flex-1 py-2 text-xs"
+                  className="flex-1 py-2 text-[10px]"
                   variant="primary"
                   onClick={() => setGeneratedAudio(true)}
                 >
@@ -1352,16 +1332,16 @@ const SuperIpView = () => {
                       />
                     ))}
                   </div>
-                  <p className="text-xs text-cyan-300 font-bold uppercase tracking-wider">
+                  <p className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider">
                     Audio Generated
                   </p>
                 </div>
               ) : (
                 <>
-                  <span className="text-xs font-bold uppercase tracking-[0.2em] text-white">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">
                     Result
                   </span>
-                  <p className="text-xs text-slate-500 font-medium">
+                  <p className="text-[10px] text-slate-500 font-medium">
                     Generated audio will appear here
                   </p>
                 </>
@@ -1392,10 +1372,10 @@ const SuperIpView = () => {
                 </div>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider mb-0.5">
+                <div className="text-[8px] text-cyan-400 font-bold uppercase tracking-wider mb-0.5">
                   Current Selection
                 </div>
-                <div className="text-xs font-bold text-white truncate">
+                <div className="text-[10px] font-bold text-white truncate">
                   Professional Doctor
                 </div>
               </div>
@@ -1405,7 +1385,7 @@ const SuperIpView = () => {
                     size={12}
                     className="text-slate-500 group-hover:text-cyan-400"
                   />
-                  <span className="text-[9px] font-bold text-slate-500 group-hover:text-cyan-400 uppercase tracking-wider">
+                  <span className="text-[8px] font-bold text-slate-500 group-hover:text-cyan-400 uppercase tracking-wider">
                     Audio
                   </span>
                 </div>
@@ -1421,21 +1401,21 @@ const SuperIpView = () => {
             {/* 1. Input Section */}
             <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 space-y-4">
               <div className="space-y-2">
-                <label className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
+                <label className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
                   Enter Prompt
                 </label>
                 <textarea
-                  className="w-full h-32 bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-xs text-white resize-none outline-none focus:border-cyan-500/50 placeholder:text-slate-600 transition-all"
+                  className="w-full h-32 bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-[10px] text-white resize-none outline-none focus:border-cyan-500/50 placeholder:text-slate-600 transition-all"
                   placeholder="Describe the character you want..."
                 />
               </div>
 
               <div className="flex gap-2 pt-2">
-                <button className="px-4 py-2 rounded-lg border border-slate-700 text-slate-400 text-xs font-bold hover:bg-slate-800 transition-colors">
+                <button className="px-4 py-2 rounded-lg border border-slate-700 text-slate-400 text-[10px] font-bold hover:bg-slate-800 transition-colors">
                   Clear
                 </button>
                 <NeonButton
-                  className="flex-1 py-2 text-xs"
+                  className="flex-1 py-2 text-[10px]"
                   variant="primary"
                 >
                   <Zap size={14} /> Generate
@@ -1446,7 +1426,7 @@ const SuperIpView = () => {
             {/* 2. Result Section */}
             <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 flex flex-col h-64">
               <div className="flex justify-between items-center mb-2">
-                <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
+                <span className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
                   Result
                 </span>
               </div>
@@ -1457,7 +1437,7 @@ const SuperIpView = () => {
                   className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
                 />
                 <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent">
-                  <p className="text-[10px] text-white/80 line-clamp-1">
+                  <p className="text-[8px] text-white/80 line-clamp-1">
                     A man looking at camera...
                   </p>
                 </div>
@@ -1466,7 +1446,7 @@ const SuperIpView = () => {
 
             {/* 3. History (Mini) */}
             <div className="pb-4">
-              <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-2 block">
+              <span className="text-[8px] uppercase tracking-widest text-slate-400 font-bold mb-2 block">
                 History
               </span>
               <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
@@ -1584,10 +1564,10 @@ const HistoryView = () => {
                     <Clock size={10} /> 2h ago
                   </span>
                 </div>
-                <h3 className="text-sm font-medium text-slate-200 truncate mb-1">
+                <h3 className="text-xs font-medium text-slate-200 truncate mb-1">
                   Project_Titan_Demo_v{item}.mp4
                 </h3>
-                <p className="text-xs text-slate-500 line-clamp-2">
+                <p className="text-[10px] text-slate-500 line-clamp-2">
                   Cyberpunk city street with neon lights
                   raining...
                 </p>
@@ -1597,7 +1577,7 @@ const HistoryView = () => {
               <span className="text-[10px] text-slate-500 font-mono">
                 ID: 8X92-29A{item}
               </span>
-              <button className="text-xs text-white hover:text-cyan-400 font-medium transition-colors">
+              <button className="text-[10px] text-white hover:text-cyan-400 font-medium transition-colors">
                 Download
               </button>
             </div>
@@ -1877,18 +1857,18 @@ const ScriptsView = () => {
           {activeMode === "rewrite" ? (
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
                   Original Script
                 </label>
                 <textarea
                   value={rewriteText}
                   onChange={(e) => setRewriteText(e.target.value)}
-                  className="w-full h-32 bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-white resize-none focus:border-fuchsia-500 outline-none placeholder:text-slate-600 transition-all"
+                  className="w-full h-32 bg-slate-950 border border-slate-700 rounded-lg p-3 text-[10px] text-white resize-none focus:border-fuchsia-500 outline-none placeholder:text-slate-600 transition-all"
                   placeholder="Enter the script content you want to rewrite..."
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
                   Reference Visual (Optional)
                 </label>
                 <div
@@ -1921,7 +1901,7 @@ const ScriptsView = () => {
                   ) : (
                     <div className="flex items-center gap-2 text-slate-500">
                       <Upload size={16} />
-                      <span className="text-xs">
+                      <span className="text-[10px]">
                         Upload Image
                       </span>
                     </div>
@@ -1980,7 +1960,7 @@ const ScriptsView = () => {
                         size={24}
                       />
                     </div>
-                    <p className="text-slate-400 text-xs font-medium">
+                    <p className="text-slate-400 text-[10px] font-medium">
                       Drag & drop or click to upload
                     </p>
                   </>
@@ -1998,7 +1978,7 @@ const ScriptsView = () => {
                 <div className="absolute inset-0 flex items-center">
                   <span className="w-full border-t border-slate-800" />
                 </div>
-                <div className="relative flex justify-center text-xs uppercase">
+                <div className="relative flex justify-center text-[10px] uppercase">
                   <span className="bg-slate-950 px-2 text-slate-500 font-bold tracking-wider">
                     Or paste link
                   </span>
@@ -2020,7 +2000,7 @@ const ScriptsView = () => {
                       if (e.target.value) setUploadedFile(null);
                     }}
                     placeholder="Paste video link (TikTok supported)"
-                    className="w-full bg-slate-950 border border-slate-700 text-white pl-10 pr-4 py-2.5 rounded-lg text-sm outline-none focus:border-fuchsia-500 focus:shadow-[0_0_15px_rgba(192,38,211,0.2)] transition-all placeholder:text-slate-600"
+                    className="w-full bg-slate-950 border border-slate-700 text-white pl-10 pr-4 py-2.5 rounded-lg text-[10px] outline-none focus:border-fuchsia-500 focus:shadow-[0_0_15px_rgba(192,38,211,0.2)] transition-all placeholder:text-slate-600"
                   />
                 </div>
               </div>
