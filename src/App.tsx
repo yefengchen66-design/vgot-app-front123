@@ -1149,46 +1149,46 @@ const SuperIpView = () => {
             animate={{ opacity: 1, x: 0 }}
             className="space-y-4"
           >
-            {/* Selected Character Context */}
-            <div className="flex items-center gap-3 bg-slate-900/50 p-3 rounded-xl border border-slate-800 backdrop-blur-sm shadow-sm">
-              <div className="w-10 h-10 rounded-lg border border-cyan-500/30 p-0.5 relative shrink-0">
-                <img
-                  src="https://images.unsplash.com/photo-1762237798212-bcc000c00891?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwb3J0cmFpdCUyMG9mJTIwYSUyMGRvY3RvciUyMHByb2Zlc3Npb25hbCUyMGhlYWRzaG90fGVufDF8fHx8MTc2NjAzMjAxM3ww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
-                  className="w-full h-full object-cover rounded"
-                  alt="Selected"
-                />
-                <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-cyan-500 rounded-full flex items-center justify-center border border-slate-900">
-                  <Check
-                    size={8}
-                    className="text-black stroke-[3]"
-                  />
+            {/* Three Upload Boxes in a Row - Container */}
+            <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4">
+              <div className="flex items-center gap-3">
+                {/* Group: Character & Audio with Divider */}
+                <div className="flex items-center">
+                  {/* Upload Box 1 - Character */}
+                  <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
+                    <ImageIcon size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
+                    <span className="text-[10px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap scale-[0.5] origin-center">
+                      上传角色
+                    </span>
+                  </div>
+
+                  {/* Vertical Divider */}
+                  <div className="w-[2px] h-10 bg-slate-600 mx-3 shrink-0 self-center" />
+
+                  {/* Upload Box 2 - Audio */}
+                  <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
+                    <Volume2 size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
+                    <span className="text-[10px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap scale-[0.5] origin-center">
+                      上传音频
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[8px] text-cyan-400 font-bold uppercase tracking-wider mb-0.5">
-                  Current Selection
-                </div>
-                <div className="text-[10px] font-bold text-white truncate">
-                  Professional Doctor
-                </div>
-              </div>
-              <div className="h-8 border-l border-slate-800 px-3 flex items-center">
-                <div className="h-full px-3 border border-dashed border-slate-700 rounded bg-slate-950/50 flex items-center justify-center gap-1.5 cursor-pointer hover:border-cyan-500/50 transition-colors group">
-                  <Upload
-                    size={12}
-                    className="text-slate-500 group-hover:text-cyan-400"
-                  />
-                  <span className="text-[8px] font-bold text-slate-500 group-hover:text-cyan-400 uppercase tracking-wider">
-                    Audio
+
+                <div className="flex-1" />
+
+                {/* Upload Box 3 - Video */}
+                <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
+                  <Film size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
+                  <span className="text-[10px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap scale-[0.5] origin-center">
+                    上传视频
                   </span>
                 </div>
+
+                {/* Send Icon Button */}
+                <button className="text-cyan-400 hover:text-cyan-300 transition-all p-1">
+                  <Send size={24} />
+                </button>
               </div>
-              <button
-                onClick={() => setStep(1)}
-                className="px-3 py-1.5 rounded-lg text-cyan-400 text-[8px] font-bold hover:bg-cyan-500/10 transition-colors uppercase tracking-wider border border-transparent hover:border-cyan-500/30"
-              >
-                Edit
-              </button>
             </div>
 
             {/* Generated Audio Selection */}
