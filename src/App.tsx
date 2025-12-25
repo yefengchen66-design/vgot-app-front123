@@ -1,3 +1,4 @@
+import { uploadSuperIpAudio } from "./lib/superIpAudioUpload";
 import React, { useState, useEffect, useRef } from "react";
 import { api } from "./lib/api";
 import {
@@ -14,6 +15,7 @@ import {
   Upload,
   ChevronRight,
   Play,
+  Pause,
   Volume2,
   X,
   Clock,
@@ -36,6 +38,7 @@ import {
   Send,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { createPortal } from "react-dom";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -494,16 +497,16 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
         }
 
         // Early failure: check for similarity violations or other error messages
-        const msg = data.error || data.message || data.detail || data.fail_reason || data.data?.error || data.data?.message || data.data?.fail_reason || "";
-        const msgStr = typeof msg === "string" ? msg : String(msg || "");
+        const msg = data.error || data.message || data.detail || data.fail_reason || data.data?.error || data.data?.message || data.data?.fail_reason || '';
+        const msgStr = typeof msg === 'string' ? msg : String(msg || '');
 
         const isSimilarityViolation =
-          msgStr.includes("相似性") ||
-          msgStr.toLowerCase().includes("similarity") ||
-          (msgStr.includes("违反") && msgStr.includes("相似性"));
+          msgStr.includes('相似性') ||
+          msgStr.toLowerCase().includes('similarity') ||
+          (msgStr.includes('违反') && msgStr.includes('相似性'));
 
         if (isSimilarityViolation) {
-          setTasks(prev => prev.map(t => t.id === localId ? { ...t, status: "failed", error: msgStr || "内容相似性校验未通过" } : t));
+          setTasks(prev => prev.map(t => t.id === localId ? { ...t, status: 'failed', error: msgStr || '内容相似性校验未通过' } : t));
           stopPolling();
           return;
         }
@@ -946,22 +949,375 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
 // 3. Super IP (Digital Human)
 const SuperIpView = () => {
   const [step, setStep] = useState(1);
+  const [isAudioSelected, setIsAudioSelected] = useState(false);
+  const [selectedAudio, setSelectedAudio] = useState<any>(null);
+  const audioUploadInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingSuperIpAudio, setIsUploadingSuperIpAudio] = useState(false);
+  const [localUploadedAudioName, setLocalUploadedAudioName] = useState<string | null>(null);
+
+  // 图库相关状态
+  const [showGallery, setShowGallery] = useState(false);
+  const [galleryImages, setGalleryImages] = useState<any[]>([]);
+  const [loadingGallery, setLoadingGallery] = useState(false);
+
+  // 音频历史记录相关状态
+  const [showAudioGallery, setShowAudioGallery] = useState(false);
+  const [audioHistory, setAudioHistory] = useState<any[]>([]);
+  const [loadingAudioHistory, setLoadingAudioHistory] = useState(false);
+  const [selectedAudioUrl, setSelectedAudioUrl] = useState<string | null>(null);
+  const [playingAudio, setPlayingAudio] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const generatedAudios = [
+    { id: 1, name: "speech_20251022.mp3", duration: "03:08:12", text: "在日本，如果你开通了TikTok账号，但是怎么发影片呢都没有任何收入，那就打开你的TikTok跟我一起操作，上个月呢，收入了5位数 现在我要把这个增加收入的方法..." },
+    { id: 2, name: "speech_20251023.mp3", duration: "03:07:07", text: "你好呀" },
+    { id: 3, name: "speech_20251024.mp3", duration: "03:06:56", text: "你好呀" },
+    { id: 4, name: "speech_20251025.mp3", duration: "08:13:22", text: "能够变现的方案A信我给你一套搞钱逻辑，这也是我花了几个月的时间，我用心去研究出来的。我觉得只要是你们用心去干啊，都能拿到结果。希望所有关注我的人啊..." },
+  ];
   const [prompt, setPrompt] = useState("");
   const [selectedBase, setSelectedBase] = useState<
     number | null
   >(null);
+  // 上传框里显示的「选中角色」图片（与结果区解耦）
+  const [selectedCharacterImage, setSelectedCharacterImage] = useState<string | null>(null);
   const [generatedImage, setGeneratedImage] = useState<
     string | null
   >(null);
   const [voiceText, setVoiceText] = useState("");
   const [generatedAudio, setGeneratedAudio] =
     useState<boolean>(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const steps = [
     { num: 1, name: "Char" },
     { num: 2, name: "Voice" },
     { num: 3, name: "Gen" },
   ];
+
+  // 生成图片
+  const handleGenerateImage = async () => {
+    if (!prompt || !prompt.trim()) {
+      alert('请输入提示词');
+      return;
+    }
+
+    setIsGenerating(true);
+
+    try {
+      const token = localStorage.getItem('access_token');
+      const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || '';
+      
+      const response = await fetch(`${API_BASE}/api/superip/generate-image`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ prompt: prompt.trim() })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('📦 SuperIP 后端响应:', data);
+        
+        // 兼容多种返回格式: data.url, data.data.url, data.image_url
+        const generatedImageUrl = data?.url || data?.data?.url || data?.image_url || null;
+        
+        if (generatedImageUrl) {
+          // 立即显示图片在结果区
+          setGeneratedImage(generatedImageUrl);
+          // 同步到上传框（方便用户继续下一步），但删除按钮只会清理上传框
+          setSelectedCharacterImage(generatedImageUrl);
+          console.log('✅ 图片生成成功:', generatedImageUrl);
+
+          // 持久存储到图库（历史记录），确保下次打开「打开图库」也能看到
+          try {
+            const savePayload = {
+              content_type: 'image',
+              content_subtype: 'superip_character',
+              source_page: 'SuperIP',
+              file_data: generatedImageUrl,
+              prompt: prompt.trim(),
+              generation_params: {},
+              api_endpoint: '/api/superip/generate-image',
+              api_response_data: data,
+            };
+
+            // best-effort，不阻塞UI
+            fetch(`${API_BASE}/api/history/save`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(savePayload),
+            })
+              .then(async (r) => {
+                if (!r.ok) {
+                  const errText = await r.text().catch(() => '');
+                  console.warn('⚠️ 保存到图库失败:', r.status, errText);
+                  return null;
+                }
+                return r.json().catch(() => null);
+              })
+              .then((saved) => {
+                // 若后端转存到 Supabase 并返回 file_url，则用它更新结果 URL
+                const savedUrl = saved?.file_url || saved?.stored_url || saved?.supabase_url;
+                if (savedUrl && typeof savedUrl === 'string') {
+                  setGeneratedImage(savedUrl);
+                  setSelectedCharacterImage(savedUrl);
+                }
+              })
+              .catch((e) => console.warn('⚠️ 保存到图库异常:', e));
+          } catch (e) {
+            console.warn('⚠️ 保存到图库异常:', e);
+          }
+          
+          // 刷新图库（后台静默加载）
+          loadGalleryImages();
+        } else {
+          console.error('❌ 未找到图片URL，完整响应:', data);
+          alert('生成失败：未返回图片URL');
+        }
+      } else {
+        const errorData = await response.json();
+        alert(`生成失败: ${errorData.detail || response.statusText}`);
+      }
+    } catch (error) {
+      console.error('❌ 生成图片失败:', error);
+      alert('生成失败，请重试');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  // 加载图库图片
+  const loadGalleryImages = async () => {
+    setLoadingGallery(true);
+    try {
+      const token = localStorage.getItem('access_token');
+      const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || '';
+      
+      const params = new URLSearchParams({
+        source_page: 'SuperIP',
+        content_type: 'image',
+        limit: '50'
+      });
+      
+      const response = await fetch(`${API_BASE}/api/history/list?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ 图库加载成功:', data);
+        setGalleryImages(Array.isArray(data) ? data : []);
+      } else {
+        console.error('❌ 图库加载失败:', response.status, response.statusText);
+        setGalleryImages([]);
+      }
+    } catch (error) {
+      console.error('❌ 加载图库失败:', error);
+      setGalleryImages([]);
+    } finally {
+      setLoadingGallery(false);
+    }
+  };
+
+  // 打开图库
+  const handleOpenGallery = () => {
+    setShowGallery(true);
+    loadGalleryImages();
+  };
+
+  // 选择图库中的图片
+  const handleSelectGalleryImage = (imageUrl: string) => {
+    // 选中图库图片：只填充「上传角色」框（不影响结果区）
+    setSelectedCharacterImage(imageUrl);
+    setShowGallery(false);
+  };
+
+  // 加载音频历史记录
+  const loadAudioHistory = async () => {
+    setLoadingAudioHistory(true);
+    try {
+      const token = localStorage.getItem('access_token');
+      const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || '';
+      
+      const params = new URLSearchParams({
+        source_page: 'SuperIP',
+        content_type: 'audio',
+        limit: '50'
+      });
+      
+      const response = await fetch(`${API_BASE}/api/history/list?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ 音频历史加载成功:', data);
+        setAudioHistory(Array.isArray(data) ? data : []);
+      } else {
+        console.error('❌ 音频历史加载失败:', response.status, response.statusText);
+        setAudioHistory([]);
+      }
+    } catch (error) {
+      console.error('❌ 加载音频历史失败:', error);
+      setAudioHistory([]);
+    } finally {
+      setLoadingAudioHistory(false);
+    }
+  };
+
+  // 打开音频历史
+  const handleOpenAudioGallery = () => {
+    setShowAudioGallery(true);
+    loadAudioHistory();
+  };
+
+  // 选择音频
+  const handleSelectAudio = (audioUrl: string) => {
+    setSelectedAudioUrl(audioUrl);
+    // Sync to UI that previously relied on selectedAudio (File) so the "Generated Audio" card updates.
+    setSelectedAudio({ name: 'Audio selected', url: audioUrl });
+    // Keep the history modal open so the user can see the selected border highlight.
+    // (They can close manually via the close button.)
+    // setShowAudioGallery(false);
+  };
+
+  const handleClearSelectedAudio = () => {
+    setSelectedAudioUrl(null);
+    setSelectedAudio(null);
+    setLocalUploadedAudioName(null);
+    if (audioUploadInputRef.current) audioUploadInputRef.current.value = "";
+  };
+
+  // Clear only local-uploaded audio (keep history selection state intact)
+  const handleClearLocalAudioUpload = () => {
+    setSelectedAudioUrl(null);
+    setLocalUploadedAudioName(null);
+    if (audioUploadInputRef.current) audioUploadInputRef.current.value = "";
+  };
+
+  const handlePickAudioFile = () => {
+    if (isUploadingSuperIpAudio) return;
+    if (audioUploadInputRef.current) {
+      // allow selecting the same file again
+      audioUploadInputRef.current.value = "";
+      audioUploadInputRef.current.click();
+    }
+  };
+
+  const handleAudioFileSelected = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingSuperIpAudio(true);
+    try {
+      const result = await uploadSuperIpAudio(file, api.post);
+      if ("error" in result) {
+        alert(result.error);
+        return;
+      }
+      // Local upload: set the source URL but don't overwrite the Generated Audio card state.
+      setSelectedAudioUrl(result.url);
+      setLocalUploadedAudioName(file.name);
+    } catch (err: any) {
+      alert(err?.message || "上传失败");
+    } finally {
+      setIsUploadingSuperIpAudio(false);
+    }
+  };
+
+  // 播放/暂停音频
+  const toggleAudioPlay = (audioUrl: string) => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio();
+    }
+
+    if (playingAudio === audioUrl) {
+      audioRef.current.pause();
+      setPlayingAudio(null);
+    } else {
+      audioRef.current.src = audioUrl;
+      audioRef.current.play();
+      setPlayingAudio(audioUrl);
+      
+      audioRef.current.onended = () => {
+        setPlayingAudio(null);
+      };
+    }
+  };
+
+  const CharacterUploadBox = ({
+    selectedImage,
+    allowOpenWhenSelected,
+  }: {
+    selectedImage: string | null;
+    allowOpenWhenSelected: boolean;
+  }) => {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          if (!selectedImage || allowOpenWhenSelected) {
+            handleOpenGallery();
+          }
+        }}
+        className={cn(
+          "w-16 h-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed rounded-lg bg-slate-950/30 transition-all cursor-pointer group relative overflow-hidden",
+          selectedImage
+            ? "border-slate-700"
+            : "border-slate-700 hover:border-cyan-500/50",
+        )}
+        aria-label={selectedImage ? "Selected character" : "Upload character"}
+      >
+        {selectedImage ? (
+          <>
+            <img
+              src={selectedImage}
+              alt="Selected character"
+              className="absolute inset-0 w-full h-full object-cover opacity-90"
+            />
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setSelectedCharacterImage(null);
+              }}
+              aria-label="Clear selected character"
+              className="absolute top-0 right-0 translate-x-1/4 -translate-y-1/4 z-30 px-1 text-white text-sm leading-none hover:text-slate-200 transition"
+              style={{ textShadow: "0 0 6px rgba(0,0,0,0.75)" }}
+            >
+              ×
+            </button>
+          </>
+        ) : (
+          <>
+            <ImageIcon
+              size={18}
+              className="text-slate-600 group-hover:text-cyan-400 transition-colors"
+            />
+            <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
+              上传角色
+            </span>
+          </>
+        )}
+      </button>
+    );
+  };
 
   return (
     <div className="flex flex-col h-full pb-24 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -1031,53 +1387,113 @@ const SuperIpView = () => {
             animate={{ opacity: 1, x: 0 }}
             className="space-y-6 pb-2"
           >
-            {/* Three Upload Boxes in a Row - Container */}
+            {/* Upload Bar (match Step 2 layout) */}
             <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4">
-              <div className="flex items-center gap-3">
-                {/* Group: Character & Audio with Divider */}
-                <div className="flex items-center">
-                  {/* Upload Box 1 - Character */}
-                  <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
-                    <ImageIcon size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
-                    <span className="text-[10px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap scale-[0.5] origin-center">
-                      上传角色
-                    </span>
-                  </div>
+              <div className="flex items-center gap-4">
+                <div className="relative flex items-center gap-3">
+                  <CharacterUploadBox
+                    selectedImage={selectedCharacterImage}
+                    allowOpenWhenSelected={true}
+                  />
 
-                  {/* Vertical Divider */}
-                  <div className="w-[2px] h-10 bg-slate-600 mx-3 shrink-0 self-center" />
+                  <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[2px] h-10 bg-slate-500/70 rounded-full" />
 
-                  {/* Upload Box 2 - Audio */}
-                  <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
-                    <Volume2 size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
-                    <span className="text-[10px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap scale-[0.5] origin-center">
-                      上传音频
+                  <div
+                    onClick={handlePickAudioFile}
+                    className={cn(
+                      "relative w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed rounded-lg transition-all cursor-pointer group h-16",
+                      selectedAudioUrl
+                        ? "border-cyan-500/70 bg-cyan-500/10 shadow-[0_0_12px_rgba(6,182,212,0.18)]"
+                        : "border-slate-700 bg-slate-950/30 hover:border-cyan-500/50",
+                    )}
+                    aria-label={selectedAudioUrl ? "Selected audio" : "Upload audio"}
+                    role="button"
+                  >
+                    <input
+                      type="file"
+                      ref={audioUploadInputRef}
+                      style={{ display: "none" }}
+                      accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/*"
+                      onChange={handleAudioFileSelected}
+                    />
+
+                    {/* Clear selected audio (local upload or history selection) */}
+                    {selectedAudioUrl && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (selectedAudio) {
+                            handleClearSelectedAudio();
+                          } else {
+                            handleClearLocalAudioUpload();
+                          }
+                        }}
+                        aria-label="清除已选择音频"
+                        title="清除"
+                        className="absolute top-0 right-0 translate-x-1/4 -translate-y-1/4 z-30 px-1 text-white text-sm leading-none hover:text-slate-200 transition"
+                        style={{ textShadow: "0 0 6px rgba(0,0,0,0.75)" }}
+                      >
+                        ×
+                      </button>
+                    )}
+
+                    <Volume2
+                      size={18}
+                      className={cn(
+                        "transition-colors",
+                        selectedAudioUrl
+                          ? "text-cyan-300"
+                          : "text-slate-600 group-hover:text-cyan-400",
+                      )}
+                    />
+                    <span
+                      className={cn(
+                        "text-[9px] transition-colors font-medium text-center leading-tight whitespace-nowrap",
+                        selectedAudioUrl
+                          ? "text-cyan-200"
+                          : "text-slate-500 group-hover:text-cyan-400",
+                      )}
+                    >
+                      {selectedAudioUrl ? (
+                        "selected..."
+                      ) : (
+                        (isUploadingSuperIpAudio ? "上传中..." : "上传音频")
+                      )}
                     </span>
                   </div>
                 </div>
 
-                <div className="flex-1" />
+                <div className="flex-1 min-w-0" />
 
-                {/* Upload Box 3 - Video */}
                 <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
-                  <Film size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
-                  <span className="text-[10px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap scale-[0.5] origin-center">
-                    上传视频
+                  <Film
+                    size={18}
+                    className="text-slate-600 group-hover:text-cyan-400 transition-colors"
+                  />
+                  <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
+                    视频生成
                   </span>
                 </div>
 
-                {/* Send Icon Button */}
-                <button className="text-cyan-400 hover:text-cyan-300 transition-all p-1">
+                <button
+                  className="text-cyan-400 hover:text-cyan-300 transition-all p-1"
+                  type="button"
+                  aria-label="Send"
+                >
                   <Send size={24} />
                 </button>
               </div>
             </div>
 
             {/* Open Gallery Button */}
-            <div className="w-full py-2 border border-slate-700 rounded-lg bg-slate-950/30 text-slate-400 text-[10px] flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors cursor-pointer hover:text-cyan-400 hover:border-cyan-500/50 group">
+            <button 
+              onClick={handleOpenGallery}
+              className="w-full py-2 border border-slate-700 rounded-lg bg-slate-950/30 text-slate-400 text-[10px] flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors cursor-pointer hover:text-cyan-400 hover:border-cyan-500/50 group"
+            >
               <ImageIcon size={14} className="group-hover:text-cyan-400 transition-colors" />
               <span className="font-medium group-hover:text-cyan-400 transition-colors">打开图库</span>
-            </div>
+            </button>
 
             {/* Workbench Input */}
             {/* Workbench Input */}
@@ -1096,45 +1512,58 @@ const SuperIpView = () => {
 
               <div className="flex gap-2 pt-2">
                 <button
-                  onClick={() => setPrompt("")}
+                  onClick={() => {
+                    setPrompt("");
+                    setGeneratedImage(null);
+                    setIsGenerating(false);
+                  }}
                   className="px-4 py-2 rounded-lg border border-slate-700 text-slate-400 text-[10px] font-bold hover:bg-slate-800 transition-colors"
                 >
                   Clear
                 </button>
                 <button
-                  onClick={() =>
-                    setGeneratedImage(
-                      "https://images.unsplash.com/photo-1686543971025-15aa01b5f7c7?w=1080",
-                    )
-                  }
-                  className="flex-1 py-2 text-[10px] font-bold text-cyan-400 border border-cyan-500/50 rounded-lg hover:bg-cyan-500/10 hover:shadow-[0_0_15px_rgba(6,182,212,0.3)] transition-all flex items-center justify-center gap-2 uppercase tracking-wide"
+                  onClick={handleGenerateImage}
+                  disabled={isGenerating || !prompt.trim()}
+                  className="flex-1 py-2 text-[10px] font-bold text-cyan-400 border border-cyan-500/50 rounded-lg hover:bg-cyan-500/10 hover:shadow-[0_0_15px_rgba(6,182,212,0.3)] transition-all flex items-center justify-center gap-2 uppercase tracking-wide disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Zap size={14} /> Generate
+                  {isGenerating ? (
+                    <>
+                      <div className="w-3 h-3 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Zap size={14} /> Generate
+                    </>
+                  )}
                 </button>
               </div>
             </div>
 
             {/* Result Section */}
             {generatedImage ? (
-              <div className="bg-slate-900/40 border border-slate-800 rounded-xl min-h-[240px] p-2 flex flex-col">
+              <div className="bg-slate-900/40 border border-slate-800 rounded-xl min-h-[240px] max-h-[400px] p-2 flex flex-col">
                 <div className="flex justify-between items-center mb-2 px-2">
                   <span className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
                     Result
                   </span>
                 </div>
-                <div className="flex-1 rounded-lg bg-black/50 overflow-hidden relative group border border-slate-800">
+                <div className="flex-1 rounded-lg bg-black/50 overflow-hidden relative group border border-slate-800 flex items-center justify-center">
                   <img
                     src={generatedImage}
                     alt="Generated Character"
-                    className="w-full h-full object-cover"
+                    className="max-w-full max-h-full object-contain"
                   />
                 </div>
               </div>
+            ) : isGenerating ? (
+              <div className="bg-slate-900/40 border border-slate-800 rounded-xl min-h-[240px] flex items-center justify-center">
+                <p className="text-[10px] text-slate-500 font-medium text-center">
+                  Generating...
+                </p>
+              </div>
             ) : (
-              <div className="bg-slate-900/40 border border-slate-800 rounded-xl min-h-[240px] flex flex-col items-center justify-center p-6 text-center space-y-3">
-                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">
-                  Result
-                </span>
+              <div className="bg-slate-900/40 border border-slate-800 rounded-xl min-h-[240px] flex items-center justify-center p-6 text-center">
                 <p className="text-[10px] text-slate-500 font-medium">
                   Generated image will appear here
                 </p>
@@ -1151,36 +1580,93 @@ const SuperIpView = () => {
           >
             {/* Three Upload Boxes in a Row - Container */}
             <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-4">
                 {/* Group: Character & Audio with Divider */}
-                <div className="flex items-center">
+                <div className="relative flex items-center gap-3">
                   {/* Upload Box 1 - Character */}
-                  <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
-                    <ImageIcon size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
-                    <span className="text-[10px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap scale-[0.5] origin-center">
-                      上传角色
-                    </span>
-                  </div>
+                  <CharacterUploadBox
+                    selectedImage={selectedCharacterImage}
+                    allowOpenWhenSelected={false}
+                  />
 
-                  {/* Vertical Divider */}
-                  <div className="w-[2px] h-10 bg-slate-600 mx-3 shrink-0 self-center" />
+                  {/* Vertical Divider (centered in the gap) */}
+                  <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[2px] h-10 bg-slate-500/70 rounded-full" />
 
                   {/* Upload Box 2 - Audio */}
-                  <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
-                    <Volume2 size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
-                    <span className="text-[10px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap scale-[0.5] origin-center">
-                      上传音频
+                  <div
+                    onClick={handlePickAudioFile}
+                    className={cn(
+                      "relative w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed rounded-lg transition-all cursor-pointer group h-16",
+                      selectedAudioUrl
+                        ? "border-cyan-500/70 bg-cyan-500/10 shadow-[0_0_12px_rgba(6,182,212,0.18)]"
+                        : "border-slate-700 bg-slate-950/30 hover:border-cyan-500/50",
+                    )}
+                    aria-label={selectedAudioUrl ? "Selected audio" : "Upload audio"}
+                    role="button"
+                  >
+                    <input
+                      type="file"
+                      ref={audioUploadInputRef}
+                      style={{ display: "none" }}
+                      accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/*"
+                      onChange={handleAudioFileSelected}
+                    />
+
+                    {/* Clear selected audio (local upload or history selection) */}
+                    {selectedAudioUrl && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (selectedAudio) {
+                            handleClearSelectedAudio();
+                          } else {
+                            handleClearLocalAudioUpload();
+                          }
+                        }}
+                        aria-label="清除已选择音频"
+                        title="清除"
+                        className="absolute top-0 right-0 translate-x-1/4 -translate-y-1/4 z-30 px-1 text-white text-sm leading-none hover:text-slate-200 transition"
+                        style={{ textShadow: "0 0 6px rgba(0,0,0,0.75)" }}
+                      >
+                        ×
+                      </button>
+                    )}
+
+                    <Volume2
+                      size={18}
+                      className={cn(
+                        "transition-colors",
+                        selectedAudioUrl
+                          ? "text-cyan-300"
+                          : "text-slate-600 group-hover:text-cyan-400",
+                      )}
+                    />
+                    <span
+                      className={cn(
+                        "text-[9px] transition-colors font-medium text-center leading-tight whitespace-nowrap",
+                        selectedAudioUrl
+                          ? "text-cyan-200"
+                          : "text-slate-500 group-hover:text-cyan-400",
+                      )}
+                    >
+                      {selectedAudioUrl ? (
+                        "selected..."
+                      ) : (
+                        (isUploadingSuperIpAudio ? "上传中..." : "上传音频")
+                      )}
                     </span>
                   </div>
                 </div>
 
-                <div className="flex-1" />
+                {/* keep remaining items aligned without forcing huge empty space on small screens */}
+                <div className="flex-1 min-w-0" />
 
                 {/* Upload Box 3 - Video */}
                 <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
                   <Film size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
-                  <span className="text-[10px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap scale-[0.5] origin-center">
-                    上传视频
+                  <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
+                    视频生成
                   </span>
                 </div>
 
@@ -1192,43 +1678,80 @@ const SuperIpView = () => {
             </div>
 
             {/* Generated Audio Selection */}
-            <div className="flex items-center gap-3 bg-slate-900/50 p-3 rounded-xl border border-slate-800 backdrop-blur-sm shadow-sm">
+            <div 
+              onClick={handleOpenAudioGallery}
+              className="relative flex items-center gap-3 bg-slate-900 p-3 rounded-xl border border-slate-800 shadow-sm cursor-pointer hover:bg-slate-800 transition-all"
+            >
               <div className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 text-cyan-400">
                 <Volume2 size={20} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[8px] text-cyan-400 font-bold uppercase tracking-wider mb-0.5">
+                <div className="ui-tiny text-cyan-400 font-bold uppercase mb-0.5">
                   Generated Audio
                 </div>
-                <div className="text-[10px] font-bold text-white truncate">
-                  speech_20251022.mp3
+                <div className="text-[8px] font-bold text-white truncate">
+                  {selectedAudio
+                    ? (selectedAudio.name || "Audio selected")
+                    : "No audio selected"}
                 </div>
               </div>
-              <button className="px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[8px] font-bold hover:bg-cyan-500/20 transition-colors uppercase tracking-wider flex items-center gap-1.5 hover:shadow-[0_0_10px_rgba(6,182,212,0.2)]">
-                <Check size={10} strokeWidth={3} /> Use
+
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleOpenAudioGallery();
+                }}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg border ui-tiny font-bold uppercase flex items-center gap-1.5 transition-all",
+                  selectedAudio
+                    ? "bg-cyan-500/10 border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20 hover:shadow-[0_0_10px_rgba(6,182,212,0.2)]"
+                    : "bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600"
+                )}
+              >
+                {selectedAudio ? (
+                  <>
+                    <Check size={10} strokeWidth={3} /> Use
+                  </>
+                ) : (
+                  "Select"
+                )}
               </button>
             </div>
 
+            {/* Audio List Display Box (Floating Overlay) */}
+            {/* 旧的悬浮音频列表（图二）已弃用：现在统一使用 Audio History 全屏库 */}
+
             {/* Workbench */}
             <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 space-y-4">
-              {/* Voice Waveform */}
+              {/* Voice Waveform - 显示区域，不是输入框 */}
               <div className="space-y-2">
-                <label className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
+                <label className="ui-tiny uppercase text-slate-400 font-bold">
                   Voice Waveform
                 </label>
                 <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Enter Voice ID..."
-                    className="flex-1 bg-slate-950/50 border border-slate-700 rounded-lg px-3 text-[10px] text-white outline-none focus:border-cyan-500/50 placeholder:text-slate-600 transition-all h-9"
-                  />
+                  {/* Waveform Display Area - Canvas 波形显示区域 */}
+                  <div className="flex-1 bg-slate-950/50 border border-slate-700 rounded-lg flex items-center justify-center h-9 overflow-hidden">
+                    {/* 波形动画显示区域（暂时为空，可以后续添加canvas动画） */}
+                    <div className="flex items-center gap-0.5 h-full px-2">
+                      {[...Array(30)].map((_, i) => (
+                        <div
+                          key={i}
+                          className="w-0.5 bg-slate-700 rounded-full transition-all"
+                          style={{
+                            height: `${Math.random() * 60 + 20}%`,
+                            opacity: 0.3
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
                   <button className="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-cyan-400 hover:bg-slate-700 hover:border-cyan-500/50 transition-colors">
                     <Play size={14} />
                   </button>
                   <button className="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 hover:bg-slate-700 hover:text-white transition-colors">
                     <X size={14} />
                   </button>
-                  <button className="px-3 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-cyan-400 hover:bg-slate-700 hover:border-cyan-500/50 transition-colors">
+                  <button className="px-3 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center ui-tiny font-bold text-cyan-400 hover:bg-slate-700 hover:border-cyan-500/50 transition-colors">
                     Match
                   </button>
                 </div>
@@ -1236,15 +1759,18 @@ const SuperIpView = () => {
 
               {/* Select Voice */}
               <div className="space-y-2">
-                <label className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
+                <label className="ui-tiny uppercase text-slate-400 font-bold">
                   Select Voice
                 </label>
-                <button className="w-full py-3 bg-slate-950/50 border border-slate-700 rounded-lg flex items-center justify-center gap-2 text-slate-300 hover:text-white hover:border-cyan-500/50 transition-colors group">
+                <button
+                  onClick={handleOpenAudioGallery}
+                  className="w-full py-3 bg-slate-950/50 border border-slate-700 rounded-lg flex items-center justify-center gap-2 text-slate-300 hover:text-white hover:border-cyan-500/50 transition-colors group"
+                >
                   <Volume2
                     size={16}
                     className="text-slate-500 group-hover:text-cyan-400 transition-colors"
                   />
-                  <span className="text-[10px] font-bold">
+                  <span className="ui-tiny font-bold">
                     Select Voice Model
                   </span>
                 </button>
@@ -1252,7 +1778,7 @@ const SuperIpView = () => {
 
               {/* Voice Cloning */}
               <div className="space-y-2">
-                <label className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
+                <label className="ui-tiny uppercase text-slate-400 font-bold">
                   Voice Cloning
                 </label>
                 <div className="h-24 border border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center bg-slate-950/50 hover:border-cyan-500/50 transition-colors cursor-pointer group relative overflow-hidden">
@@ -1272,7 +1798,7 @@ const SuperIpView = () => {
 
               {/* Input Text */}
               <div className="space-y-2">
-                <label className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
+                <label className="ui-tiny uppercase text-slate-400 font-bold">
                   Input Text
                 </label>
                 <div className="relative group">
@@ -1356,46 +1882,45 @@ const SuperIpView = () => {
             animate={{ opacity: 1, x: 0 }}
             className="flex-1 flex flex-col space-y-4"
           >
-            {/* Selected Character Context */}
-            <div className="flex items-center gap-3 bg-slate-900/50 p-3 rounded-xl border border-slate-800 backdrop-blur-sm shadow-sm">
-              <div className="w-10 h-10 rounded-lg border border-cyan-500/30 p-0.5 relative shrink-0">
-                <img
-                  src="https://images.unsplash.com/photo-1762237798212-bcc000c00891?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwb3J0cmFpdCUyMG9mJTIwYSUyMGRvY3RvciUyMHByb2Zlc3Npb25hbCUyMGhlYWRzaG90fGVufDF8fHx8MTc2NjAzMjAxM3ww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
-                  className="w-full h-full object-cover rounded"
-                  alt="Selected"
-                />
-                <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-cyan-500 rounded-full flex items-center justify-center border border-slate-900">
-                  <Check
-                    size={8}
-                    className="text-black stroke-[3]"
+            {/* Three Upload Boxes in a Row - Container */}
+            <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4">
+              <div className="flex items-center gap-4">
+                {/* Group: Character & Audio with Divider */}
+                <div className="relative flex items-center gap-3">
+                  {/* Upload Box 1 - Character */}
+                  <CharacterUploadBox
+                    selectedImage={selectedCharacterImage}
+                    allowOpenWhenSelected={false}
                   />
+
+                  {/* Vertical Divider (centered in the gap) */}
+                  <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[2px] h-10 bg-slate-500/70 rounded-full" />
+
+                  {/* Upload Box 2 - Audio */}
+                  <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
+                    <Volume2 size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
+                    <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
+                      上传音频
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[8px] text-cyan-400 font-bold uppercase tracking-wider mb-0.5">
-                  Current Selection
-                </div>
-                <div className="text-[10px] font-bold text-white truncate">
-                  Professional Doctor
-                </div>
-              </div>
-              <div className="h-8 border-l border-slate-800 px-3 flex items-center">
-                <div className="h-full px-3 border border-dashed border-slate-700 rounded bg-slate-950/50 flex items-center justify-center gap-1.5 cursor-pointer hover:border-cyan-500/50 transition-colors group">
-                  <Upload
-                    size={12}
-                    className="text-slate-500 group-hover:text-cyan-400"
-                  />
-                  <span className="text-[8px] font-bold text-slate-500 group-hover:text-cyan-400 uppercase tracking-wider">
-                    Audio
+
+                {/* keep remaining items aligned without forcing huge empty space on small screens */}
+                <div className="flex-1 min-w-0" />
+
+                {/* Upload Box 3 - Video */}
+                <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
+                  <Film size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
+                  <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
+                    视频生成
                   </span>
                 </div>
+
+                {/* Send Icon Button */}
+                <button className="text-cyan-400 hover:text-cyan-300 transition-all p-1">
+                  <Send size={24} />
+                </button>
               </div>
-              <button className="w-10 h-10 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 hover:bg-cyan-500 hover:text-black transition-all group shadow-[0_0_10px_rgba(6,182,212,0.15)] hover:shadow-[0_0_20px_rgba(6,182,212,0.4)]">
-                <Zap
-                  size={20}
-                  className="group-hover:fill-current"
-                />
-              </button>
             </div>
 
             {/* 1. Input Section */}
@@ -1487,6 +2012,283 @@ const SuperIpView = () => {
           {step === 3 ? "Start New" : "Next Step"}
         </NeonButton>
       </div>
+
+      {/* Gallery Modal */}
+      {showGallery && createPortal(
+        <AnimatePresence>
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowGallery(false)}
+              className="fixed inset-0 bg-black/70 backdrop-blur-sm"
+              style={{ zIndex: 999999 }}
+            />
+            
+            {/* Gallery Dialog - 全屏显示，从顶部开始 */}
+            <motion.div
+              initial={{ opacity: 0, y: '100%' }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: '100%' }}
+              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className="fixed inset-0 bg-[#0f1419] flex flex-col overflow-hidden"
+              style={{ zIndex: 1000000 }}
+            >
+              {/* Header with close button */}
+              <div className="flex items-center justify-between px-4 py-3.5 border-b border-slate-800/50 bg-slate-950/60 flex-shrink-0">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <ImageIcon size={16} className="text-cyan-400" />
+                  Select Image - History
+                </h3>
+                <button 
+                  onClick={() => setShowGallery(false)}
+                  className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
+                  aria-label="关闭图库"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              
+              {/* Content - 全屏滚动，充分利用空间 */}
+              <div 
+                className="flex-1 overflow-y-auto px-4 pt-3 pb-4" 
+                style={{ 
+                  scrollbarWidth: 'thin',
+                  scrollbarColor: '#475569 transparent'
+                }}
+              >
+                {loadingGallery ? (
+                  <div className="flex flex-col items-center justify-center py-20">
+                    <div className="w-10 h-10 border-3 border-cyan-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+                    <p className="text-xs text-slate-400 font-medium">加载中...</p>
+                  </div>
+                ) : galleryImages.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-20">
+                    <div className="w-16 h-16 rounded-full bg-slate-800/30 flex items-center justify-center mb-3">
+                      <ImageIcon size={28} className="text-slate-600" />
+                    </div>
+                    <p className="text-sm text-slate-400 font-medium mb-1">暂无历史图片</p>
+                    <p className="text-xs text-slate-600">生成图片后会显示在这里</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3 pb-4">
+                    {galleryImages.map((img, index) => (
+                      <motion.div
+                        key={img.id || index}
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: index * 0.02 }}
+                        onClick={() => handleSelectGalleryImage(img.file_url)}
+                        className="relative aspect-[2/3] rounded-xl overflow-hidden bg-slate-950 border border-slate-800 cursor-pointer hover:border-cyan-500/80 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 group"
+                      >
+                        <img
+                          src={img.file_url}
+                          alt={img.prompt || `图片 ${index + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                        {/* Hover overlay with prompt */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2.5">
+                          {img.prompt && (
+                            <p className="text-[9px] text-white/90 line-clamp-2 font-medium leading-snug">{img.prompt}</p>
+                          )}
+                        </div>
+                        {/* Selection indicator */}
+                        <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-cyan-500/90 backdrop-blur-sm flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
+                          <Check size={12} className="text-white" strokeWidth={3} />
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              
+              {/* Bottom Close Button - 明显的退出按钮 */}
+              <div className="flex-shrink-0 p-3 bg-slate-950/80 border-t border-slate-800/50">
+                <button
+                  onClick={() => setShowGallery(false)}
+                  className="w-full py-3 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white font-medium text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
+                >
+                  <X size={18} />
+                  关闭图库
+                </button>
+              </div>
+            </motion.div>
+          </>
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* Audio Gallery Modal */}
+      {showAudioGallery && createPortal(
+        <AnimatePresence>
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowAudioGallery(false)}
+              className="fixed inset-0 bg-black/70 backdrop-blur-sm"
+              style={{ zIndex: 999999 }}
+            />
+            
+            {/* Audio Gallery Dialog - 全屏显示 */}
+            <motion.div
+              initial={{ opacity: 0, y: '100%' }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: '100%' }}
+              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className="fixed inset-0 bg-[#0f1419] flex flex-col overflow-hidden"
+              style={{ zIndex: 1000000 }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3.5 border-b border-slate-800/50 bg-slate-950/60 flex-shrink-0">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <Volume2 size={16} className="text-cyan-400" />
+                  Select Audio - History
+                </h3>
+                <button 
+                  onClick={() => setShowAudioGallery(false)}
+                  className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
+                  aria-label="关闭音频库"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              
+              {/* Content - 音频列表 */}
+              <div 
+                className="flex-1 overflow-y-auto px-5 pt-4 pb-5" 
+                style={{ 
+                  scrollbarWidth: 'thin',
+                  scrollbarColor: '#475569 transparent'
+                }}
+              >
+                {loadingAudioHistory ? (
+                  <div className="flex flex-col items-center justify-center py-20">
+                    <div className="w-10 h-10 border-3 border-cyan-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+                    <p className="text-xs text-slate-400 font-medium">加载中...</p>
+                  </div>
+                ) : audioHistory.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-20">
+                    <div className="w-16 h-16 rounded-full bg-slate-800/30 flex items-center justify-center mb-3">
+                      <Volume2 size={28} className="text-slate-600" />
+                    </div>
+                    <p className="text-sm text-slate-400 font-medium mb-1">暂无历史音频</p>
+                    <p className="text-xs text-slate-600">生成音频后会显示在这里</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {audioHistory.map((audio, index) => (
+                      (() => {
+                        const isSelected = !!selectedAudioUrl && selectedAudioUrl === audio.file_url;
+
+                        return (
+                      <motion.div
+                        key={audio.id || index}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.03 }}
+                        className={cn(
+                          "bg-slate-900/60 border rounded-xl px-4 py-4 transition-all group",
+                          isSelected
+                            ? "border-2 border-cyan-400 shadow-[0_0_0_2px_rgba(34,211,238,0.25)]"
+                            : "border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-800/60",
+                        )}
+                      >
+                        <div className="flex items-start gap-3">
+                          {/* Audio Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="pl-3">
+                              <div className="flex items-center gap-2 mb-1">
+                                <Volume2 size={12} className="text-white flex-shrink-0" />
+                                <span className="text-xs font-semibold text-white truncate">
+                                  {audio.generation_params?.voice_name || '音频文件'}
+                                </span>
+                              </div>
+                              {(() => {
+                                const promptText =
+                                  audio?.prompt ||
+                                  audio?.generation_params?.prompt ||
+                                  audio?.generation_params?.text ||
+                                  audio?.text ||
+                                  audio?.input_text ||
+                                  audio?.api_response_data?.text ||
+                                  '';
+
+                                return promptText ? (
+                                  <div
+                                    className="mt-2 rounded-lg bg-white/6 border border-white/12 px-2 py-1.5 overflow-hidden"
+                                    title={promptText}
+                                    style={{
+                                      lineHeight: '1.35',
+                                      maxHeight: '2.7em',
+                                    }}
+                                  >
+                                    <p
+                                      className="text-[10px] text-white break-words"
+                                      style={{
+                                        display: '-webkit-box',
+                                        WebkitBoxOrient: 'vertical',
+                                        WebkitLineClamp: 2,
+                                        overflow: 'hidden',
+                                      }}
+                                    >
+                                      {promptText}
+                                    </p>
+                                  </div>
+                                ) : null;
+                              })()}
+                              {audio.created_at && (
+                                <p className="text-[9px] text-white/80 mt-2">
+                                  {new Date(audio.created_at).toLocaleString('zh-CN')}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Select Button */}
+                          <button
+                            onClick={() => handleSelectAudio(audio.file_url)}
+                            disabled={isSelected}
+                            className={cn(
+                              "flex-shrink-0 px-3 py-1.5 rounded-lg border text-[9px] font-bold transition-all",
+                              isSelected
+                                ? "bg-cyan-500/10 border-cyan-500/30 text-cyan-400 cursor-default"
+                                : "bg-cyan-500/10 border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20 hover:shadow-[0_0_10px_rgba(6,182,212,0.3)]",
+                            )}
+                          >
+                            {isSelected ? '已选择' : '选择'}
+                          </button>
+
+                        </div>
+                      </motion.div>
+                        );
+                      })()
+                    ))}
+                  </div>
+                )}
+              </div>
+              
+              {/* Bottom Close Button */}
+              <div className="flex-shrink-0 p-3 bg-slate-950/80 border-t border-slate-800/50">
+                <button
+                  onClick={() => setShowAudioGallery(false)}
+                  className="w-full py-3 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white font-medium text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
+                >
+                  <X size={18} />
+                  关闭音频库
+                </button>
+              </div>
+            </motion.div>
+          </>
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 };

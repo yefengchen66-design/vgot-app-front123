@@ -189,6 +189,21 @@
   body { font-size: 14px; }
   input, select, textarea { font-size: 16px; }
 
+  /*
+    Force tiny UI text.
+    Some mobile browsers and font rendering will round very small font sizes,
+    making small Tailwind text-[Npx] look unchanged.
+    This utility uses !important plus a small scale-down to make the change obvious.
+  */
+  .ui-tiny {
+    font-size: 12px !important;
+    line-height: 1.1 !important;
+    letter-spacing: 0 !important;
+    transform: scale(0.85);
+    transform-origin: left center;
+    display: inline-block;
+  }
+
   hr {
     height: 0;
     color: inherit;
