@@ -2295,12 +2295,112 @@ const SuperIpView = () => {
 
 // 4. History Page
 const HistoryView = () => {
-  const filters = [
-    "All",
-    "Video",
-    "Image",
-    "Audio",
+  type HistoryContentType = "image" | "video" | "audio";
+
+  type HistoryRecord = {
+    id: number | string;
+    content_type: HistoryContentType;
+    content_subtype?: string | null;
+    source_page?: string | null;
+    prompt?: string | null;
+    created_at?: string | null;
+    duration?: number | null;
+    dimensions?: string | null;
+    file_url?: string | null;
+  };
+
+  const filters: Array<{ label: string; value: "all" | HistoryContentType }> = [
+    { label: "All", value: "all" },
+    { label: "Video", value: "video" },
+    { label: "Image", value: "image" },
+    { label: "Audio", value: "audio" },
   ];
+
+  const [activeFilter, setActiveFilter] = useState<
+    "all" | HistoryContentType
+  >("all");
+  const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  const fetchHistory = async (filter: "all" | HistoryContentType) => {
+    setLoadingHistory(true);
+    try {
+      const token = localStorage.getItem("access_token") || localStorage.getItem("token");
+      const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || "";
+
+      const params = new URLSearchParams({ limit: "100" });
+      if (filter !== "all") params.append("content_type", filter);
+
+      const resp = await fetch(`${API_BASE}/api/history/list?${params.toString()}`,
+        {
+          method: "GET",
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            "Content-Type": "application/json",
+          },
+        },
+      );
+
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => "");
+        console.warn("❌ 加载历史失败:", resp.status, errText);
+        setHistoryRecords([]);
+        return;
+      }
+
+      const data = await resp.json();
+      setHistoryRecords(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.warn("❌ 加载历史失败:", e);
+      setHistoryRecords([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchHistory(activeFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFilter]);
+
+  const formatHistoryDate = (iso?: string | null) => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toLocaleString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const downloadFromUrl = async (url: string, record: HistoryRecord) => {
+    try {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+
+      const ts = Date.now();
+      const ext =
+        record.content_type === "image"
+          ? "png"
+          : record.content_type === "video"
+            ? "mp4"
+            : "mp3";
+      link.download = `vgot_${record.content_type}_${ts}.${ext}`;
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      console.warn("Download failed:", e);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full pb-24 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -2313,78 +2413,135 @@ const HistoryView = () => {
       {/* Horizontal Filter Chips */}
       <div className="flex overflow-x-auto gap-3 pb-4 mb-2 no-scrollbar mask-gradient-right">
         {filters.map((f, i) => (
+          (() => {
+            const isActive = activeFilter === f.value;
+            return (
           <button
-            key={f}
+            key={f.value}
+            onClick={() => setActiveFilter(f.value)}
             className={cn(
               "px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap transition-all border",
-              i === 0
+              isActive
                 ? "bg-fuchsia-500/10 border-fuchsia-500 text-fuchsia-400 shadow-[0_0_10px_rgba(192,38,211,0.2)]"
                 : "bg-slate-900/50 border-slate-800 text-slate-500 hover:border-slate-700 hover:text-slate-400",
             )}
           >
-            {f}
+            {f.label}
           </button>
+            );
+          })()
         ))}
       </div>
 
       {/* List */}
       <div className="space-y-4 overflow-y-auto">
-        {[1, 2, 3, 4, 5].map((item) => (
-          <GlassCard
-            key={item}
-            className="p-0 flex flex-col group border-slate-800 bg-slate-900/40"
-          >
-            <div className="flex p-4 gap-4 items-start">
-              <div className="w-24 h-24 bg-black rounded-lg shrink-0 overflow-hidden relative">
-                <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
-                  {item % 2 === 0 ? (
-                    <Video
-                      size={20}
-                      className="text-slate-700"
-                    />
-                  ) : (
-                    <ImageIcon
-                      size={20}
-                      className="text-slate-700"
-                    />
-                  )}
+        {loadingHistory ? (
+          <div className="py-10 text-center text-slate-500 text-[10px] font-medium">
+            Loading...
+          </div>
+        ) : historyRecords.length === 0 ? (
+          <div className="py-10 text-center text-slate-500 text-[10px] font-medium">
+            No history
+          </div>
+        ) : (
+          historyRecords.map((record) => {
+            const type = record.content_type;
+            const dateText = formatHistoryDate(record.created_at);
+            const badgeClass =
+              record.source_page === "HyperSell"
+                ? "border-purple-500/30 text-purple-400 bg-purple-500/10"
+                : "border-cyan-500/30 text-cyan-400 bg-cyan-500/10";
+            const badgeText = record.source_page === "HyperSell" ? "HyperSell" : "Super IP";
+
+            return (
+              <GlassCard
+                key={String(record.id)}
+                className="p-0 flex flex-col group border-slate-800 bg-slate-900/40"
+              >
+                <div className="flex p-4 gap-4 items-start">
+                  <div className="w-24 h-24 bg-black rounded-lg shrink-0 overflow-hidden relative">
+                    {type === "image" && record.file_url ? (
+                      <img
+                        src={record.file_url}
+                        alt={record.prompt || "History image"}
+                        className="w-full h-full object-cover opacity-90"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
+                        {type === "video" ? (
+                          <Video size={20} className="text-slate-700" />
+                        ) : type === "audio" ? (
+                          <Volume2 size={20} className="text-slate-700" />
+                        ) : (
+                          <ImageIcon size={20} className="text-slate-700" />
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-start mb-1">
+                      <span
+                        className={cn(
+                          "text-[10px] font-bold px-2 py-0.5 rounded border uppercase",
+                          badgeClass,
+                        )}
+                      >
+                        {badgeText}
+                      </span>
+                      {dateText && (
+                        <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                          <Clock size={10} /> {dateText}
+                        </span>
+                      )}
+                    </div>
+
+                    {record.prompt ? (
+                      <p className="text-[10px] text-slate-400 line-clamp-2">
+                        {record.prompt}
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-slate-600">No prompt</p>
+                    )}
+
+                    {type === "audio" && record.file_url && (
+                      <div className="mt-2">
+                        <audio
+                          controls
+                          src={record.file_url}
+                          controlsList="nodownload noplaybackrate"
+                          className="w-full"
+                          onContextMenu={(e) => e.preventDefault()}
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex justify-between items-start mb-1">
-                  <span
+
+                <div className="border-t border-white/5 p-3 flex justify-between items-center bg-white/[0.02]">
+                  {/* id is still real data, but keep it subtle */}
+                  <span className="text-[10px] text-slate-600 font-mono">
+                    {record.id ? `ID: ${record.id}` : ""}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={!record.file_url}
+                    onClick={() => record.file_url && downloadFromUrl(record.file_url, record)}
                     className={cn(
-                      "text-[10px] font-bold px-2 py-0.5 rounded border uppercase",
-                      item % 2 === 0
-                        ? "border-purple-500/30 text-purple-400 bg-purple-500/10"
-                        : "border-cyan-500/30 text-cyan-400 bg-cyan-500/10",
+                      "text-[10px] font-medium transition-colors",
+                      record.file_url
+                        ? "text-white hover:text-cyan-400"
+                        : "text-slate-600 cursor-not-allowed",
                     )}
                   >
-                    {item % 2 === 0 ? "HyperSell" : "Super IP"}
-                  </span>
-                  <span className="text-[10px] text-slate-500 flex items-center gap-1">
-                    <Clock size={10} /> 2h ago
-                  </span>
+                    Download
+                  </button>
                 </div>
-                <h3 className="text-xs font-medium text-slate-200 truncate mb-1">
-                  Project_Titan_Demo_v{item}.mp4
-                </h3>
-                <p className="text-[10px] text-slate-500 line-clamp-2">
-                  Cyberpunk city street with neon lights
-                  raining...
-                </p>
-              </div>
-            </div>
-            <div className="border-t border-white/5 p-3 flex justify-between items-center bg-white/[0.02]">
-              <span className="text-[10px] text-slate-500 font-mono">
-                ID: 8X92-29A{item}
-              </span>
-              <button className="text-[10px] text-white hover:text-cyan-400 font-medium transition-colors">
-                Download
-              </button>
-            </div>
-          </GlassCard>
-        ))}
+              </GlassCard>
+            );
+          })
+        )}
       </div>
     </div>
   );
