@@ -969,6 +969,7 @@ const SuperIpView = () => {
   // so downstream APIs can use either form depending on backend requirements.
   const [characterImageBase64, setCharacterImageBase64] = useState<string | null>(null);
   const [audioBase64, setAudioBase64] = useState<string | null>(null);
+  const [selectedAudioHistoryId, setSelectedAudioHistoryId] = useState<number | string | null>(null);
 
 
   // --- VOICE workbench (backend wired, aligned with desktop SuperIP) ---
@@ -1005,6 +1006,18 @@ const SuperIpView = () => {
   const [isPlayingTrial, setIsPlayingTrial] = useState(false);
   const trialAudioRef = useRef<HTMLAudioElement | null>(null);
   const [trialAudioUrl, setTrialAudioUrl] = useState<string>("");
+
+  // Clone preview player state (native <audio controls> looks bad on mobile)
+  const clonePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlayingClonePreview, setIsPlayingClonePreview] = useState(false);
+  const [clonePreviewDuration, setClonePreviewDuration] = useState(0);
+  const [clonePreviewCurrentTime, setClonePreviewCurrentTime] = useState(0);
+
+  // Result audio player (custom UI)
+  const resultAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlayingResult, setIsPlayingResult] = useState(false);
+  const [resultDuration, setResultDuration] = useState(0);
+  const [resultCurrentTime, setResultCurrentTime] = useState(0);
 
   const cloneInputRef = useRef<HTMLInputElement>(null);
   const [cloneUploading, setCloneUploading] = useState(false);
@@ -1313,11 +1326,26 @@ const SuperIpView = () => {
     // setShowAudioGallery(false);
   };
 
+  const handleSelectAudioHistoryItem = (audio: any) => {
+    const url = (audio?.file_url || audio?.url || audio?.audio_url || '').toString();
+    if (!url) return;
+    setSelectedAudioHistoryId(audio?.id ?? null);
+    handleSelectAudio(url);
+  };
+
+  const normalizeUrlForCompare = (url: string | null | undefined) => {
+    const u = (url || '').trim();
+    if (!u) return '';
+    // normalize common differences: signed urls / cache-busters
+    return u.split('#')[0].split('?')[0];
+  };
+
   const handleClearSelectedAudio = () => {
     setSelectedAudioUrl(null);
     setSelectedAudio(null);
     setLocalUploadedAudioName(null);
     setAudioBase64(null);
+    setSelectedAudioHistoryId(null);
     if (audioUploadInputRef.current) audioUploadInputRef.current.value = "";
   };
 
@@ -1380,6 +1408,14 @@ const SuperIpView = () => {
       reader.onload = () => resolve(String(reader.result || ""));
       reader.onerror = () => reject(new Error("read failed"));
       reader.readAsDataURL(file);
+    });
+
+  const blobToDataUrl = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("read failed"));
+      reader.readAsDataURL(blob);
     });
 
   // 播放/暂停音频
@@ -1802,7 +1838,8 @@ const SuperIpView = () => {
       }
       const vid = resp?.voice_id || resp?.data?.voice_id || "";
       if (audioUrl) {
-        setCloneAudioUrl(String(audioUrl));
+        const nextUrl = String(audioUrl);
+        setCloneAudioUrl(nextUrl);
         if (vid) setVoiceId(String(vid));
       } else {
         alert(resp?.error || "Clone preview failed");
@@ -1813,6 +1850,69 @@ const SuperIpView = () => {
       setIsCloningPreview(false);
     }
   };
+
+  const formatTime = (sec: number) => {
+    if (!Number.isFinite(sec) || sec <= 0) return "0:00";
+    const s = Math.floor(sec % 60)
+      .toString()
+      .padStart(2, "0");
+    const m = Math.floor(sec / 60).toString();
+    return `${m}:${s}`;
+  };
+
+  useEffect(() => {
+    const el = clonePreviewAudioRef.current;
+    if (!el) return;
+
+    const onLoaded = () => {
+      setClonePreviewDuration(Number.isFinite(el.duration) ? el.duration : 0);
+    };
+    const onTime = () => {
+      setClonePreviewCurrentTime(el.currentTime || 0);
+    };
+    const onPlay = () => setIsPlayingClonePreview(true);
+    const onPause = () => setIsPlayingClonePreview(false);
+    const onEnded = () => setIsPlayingClonePreview(false);
+
+    el.addEventListener("loadedmetadata", onLoaded);
+    el.addEventListener("timeupdate", onTime);
+    el.addEventListener("play", onPlay);
+    el.addEventListener("pause", onPause);
+    el.addEventListener("ended", onEnded);
+
+    return () => {
+      el.removeEventListener("loadedmetadata", onLoaded);
+      el.removeEventListener("timeupdate", onTime);
+      el.removeEventListener("play", onPlay);
+      el.removeEventListener("pause", onPause);
+      el.removeEventListener("ended", onEnded);
+    };
+  }, [cloneAudioUrl]);
+
+  useEffect(() => {
+    const el = resultAudioRef.current;
+    if (!el) return;
+
+    const onLoaded = () => setResultDuration(Number.isFinite(el.duration) ? el.duration : 0);
+    const onTime = () => setResultCurrentTime(el.currentTime || 0);
+    const onPlay = () => setIsPlayingResult(true);
+    const onPause = () => setIsPlayingResult(false);
+    const onEnded = () => setIsPlayingResult(false);
+
+    el.addEventListener("loadedmetadata", onLoaded);
+    el.addEventListener("timeupdate", onTime);
+    el.addEventListener("play", onPlay);
+    el.addEventListener("pause", onPause);
+    el.addEventListener("ended", onEnded);
+
+    return () => {
+      el.removeEventListener("loadedmetadata", onLoaded);
+      el.removeEventListener("timeupdate", onTime);
+      el.removeEventListener("play", onPlay);
+      el.removeEventListener("pause", onPause);
+      el.removeEventListener("ended", onEnded);
+    };
+  }, [selectedAudioUrl]);
 
   const handleGenerateVoice = async () => {
     if (!voiceText || !voiceText.trim()) {
@@ -1827,7 +1927,8 @@ const SuperIpView = () => {
 
     setIsGenerating(true);
     try {
-      const source_type = overrideVoiceId ? "system" : "waveform";
+      // keep consistent with backend expectations: system voice vs trial waveform vs clone
+      const source_type = overrideVoiceId ? "system" : cloneFileId ? "clone" : "waveform";
       const res: any = await api.post("/api/audio/synthesize", {
         text: voiceText,
         voice_id: effectiveVoiceId,
@@ -1845,6 +1946,61 @@ const SuperIpView = () => {
       setSelectedAudioUrl(String(audioUrl));
       setSelectedAudio({ name: "generated_audio.mp3", url: String(audioUrl) });
       setGeneratedAudio(true);
+
+      // Dual-track: best-effort fetch -> base64 (data URL) so downstream APIs can use inline audio
+      // Note: this may fail if the audio URL doesn't allow CORS; keep non-blocking.
+      setAudioBase64(null);
+      (async () => {
+        try {
+          const r = await fetch(String(audioUrl));
+          if (!r.ok) throw new Error(`fetch failed: ${r.status}`);
+          const blob = await r.blob();
+          const b64 = await blobToDataUrl(blob);
+          if (b64 && typeof b64 === 'string') setAudioBase64(b64);
+        } catch (e) {
+          console.warn('Failed to build audio base64 track (CORS or fetch issue)', e);
+        }
+      })();
+
+      // Persist generated audio into history (desktop parity: Vgot_front HistoryService.saveGeneratedContent)
+      try {
+        const payload = {
+          content_type: "audio",
+          content_subtype: "superip_voice_tts",
+          source_page: "SuperIP",
+          file_data: String(audioUrl),
+          prompt: voiceText,
+          generation_params: {
+            voice_id: effectiveVoiceId,
+            source_type,
+          },
+          api_endpoint: "/api/audio/synthesize",
+          api_response_data: res,
+        };
+
+        // best-effort; don't block playback/selection UX
+        api
+          .post("/api/history/save", payload)
+          .then((saved: any) => {
+            // Prefer canonical url/id returned by backend so the history list can match reliably
+            const savedId = saved?.id ?? saved?.data?.id ?? null;
+            const savedUrl = saved?.file_url || saved?.data?.file_url || saved?.stored_url || saved?.data?.stored_url || saved?.supabase_url || saved?.data?.supabase_url;
+            if (savedId !== null && savedId !== undefined) setSelectedAudioHistoryId(savedId);
+            if (savedUrl && typeof savedUrl === 'string') {
+              setSelectedAudioUrl(savedUrl);
+              setSelectedAudio({ name: "generated_audio.mp3", url: savedUrl });
+            }
+            // Refresh audio history so the new record shows immediately in the modal
+            loadAudioHistory();
+          })
+          .catch((err: any) => {
+            console.warn("Failed to save synthesized audio to history", err);
+            // Still try refresh in case backend saves history inside synth endpoint
+            loadAudioHistory();
+          });
+      } catch (e) {
+        console.warn("Failed to save synthesized audio to history", e);
+      }
     } catch (e: any) {
       alert(e?.message || "合成失败");
     } finally {
@@ -2529,6 +2685,59 @@ const SuperIpView = () => {
                   </div>
                 </div>
 
+                {/* Clone preview audio (separate from the main waveform UI) */}
+                {cloneAudioUrl && (
+                  <div className="mt-2 rounded-lg bg-slate-950/35 border border-slate-700 px-3 py-1.5">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const el = clonePreviewAudioRef.current;
+                          if (!el) return;
+                          if (el.paused) el.play().catch(() => {});
+                          else el.pause();
+                        }}
+                        className="w-8 h-8 rounded-full bg-slate-900/60 border border-slate-700 flex items-center justify-center text-cyan-200 hover:border-cyan-500/40"
+                        aria-label="Play clone preview"
+                      >
+                        {isPlayingClonePreview ? <Pause size={12} /> : <Play size={12} />}
+                      </button>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[10px] text-slate-300 font-bold truncate">
+                          {cloneDisplayName ? `${cloneDisplayName} · Preview` : "Clone Preview"}
+                        </div>
+
+                        <div className="mt-0.5 flex items-center gap-2">
+                          <div className="text-[10px] text-slate-500 tabular-nums leading-none">
+                            {formatTime(clonePreviewCurrentTime)} / {formatTime(clonePreviewDuration)}
+                          </div>
+                          <input
+                            type="range"
+                            min={0}
+                            max={clonePreviewDuration || 0}
+                            step={0.01}
+                            value={Math.min(clonePreviewCurrentTime, clonePreviewDuration || 0)}
+                            onChange={(e) => {
+                              const el = clonePreviewAudioRef.current;
+                              if (!el) return;
+                              el.currentTime = Number(e.target.value);
+                            }}
+                            className="flex-1 accent-cyan-400 clone-preview-range"
+                            style={{ height: 2 }}
+                          />
+                        </div>
+                      </div>
+
+                      <audio
+                        ref={clonePreviewAudioRef}
+                        src={cloneAudioUrl}
+                        preload="metadata"
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {showCloneRename && (
                   <div className="mt-2 rounded-lg bg-slate-950/40 border border-slate-700 p-2 flex items-center gap-2">
                     <input
@@ -2577,7 +2786,26 @@ const SuperIpView = () => {
               {/* Actions */}
               <div className="flex gap-2 pt-2">
                 <button
-                  onClick={() => setVoiceText("")}
+                  onClick={() => {
+                    // Clear prompt + generated result UI
+                    setVoiceText("");
+                    setGeneratedAudio(false);
+                    setSelectedAudioUrl(null);
+                    setSelectedAudio(null);
+                    setPlayingAudio(null);
+                    try {
+                      audioRef.current?.pause();
+                    } catch {
+                      // ignore
+                    }
+                    audioRef.current = null;
+                    try {
+                      resultAudioRef.current?.pause();
+                    } catch {
+                      // ignore
+                    }
+                    resultAudioRef.current = null;
+                  }}
                   className="px-4 py-2 rounded-lg border border-slate-700 text-slate-400 text-[10px] font-bold hover:bg-slate-800 transition-colors"
                 >
                   Clear
@@ -2595,30 +2823,60 @@ const SuperIpView = () => {
 
             {/* Result */}
             <div className="bg-slate-900/40 border border-slate-800 rounded-xl min-h-[200px] flex flex-col items-center justify-center p-6 text-center space-y-3 relative overflow-hidden">
-              {generatedAudio ? (
-                <div className="w-full h-full flex flex-col items-center justify-center space-y-4 animate-in fade-in zoom-in duration-300">
-                  <div className="w-16 h-16 rounded-full bg-cyan-500/10 flex items-center justify-center border border-cyan-500/50 shadow-[0_0_20px_rgba(6,182,212,0.3)]">
-                    <Play
-                      size={24}
-                      className="text-cyan-400 ml-1"
-                      fill="currentColor"
-                    />
-                  </div>
-                  <div className="w-full h-8 flex gap-1 items-center justify-center">
-                    {[...Array(10)].map((_, i) => (
-                      <div
-                        key={i}
-                        className="w-1 bg-cyan-500/50 rounded-full animate-pulse"
-                        style={{
-                          height: Math.random() * 24 + 8,
-                          animationDelay: `${i * 0.1}s`,
-                        }}
-                      />
-                    ))}
-                  </div>
-                  <p className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider">
+              {generatedAudio && selectedAudioUrl ? (
+                <div className="w-full h-full flex flex-col items-center justify-center space-y-2 animate-in fade-in zoom-in duration-300">
+                  <div className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider">
                     Audio Generated
-                  </p>
+                  </div>
+
+                  <div className="w-full max-w-[340px]">
+                    <div className="rounded-lg bg-slate-950/35 border border-slate-700 px-3 py-2 text-left">
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const el = resultAudioRef.current;
+                            if (!el) return;
+                            if (el.paused) el.play().catch(() => {});
+                            else el.pause();
+                          }}
+                          className="w-9 h-9 rounded-full bg-slate-900/60 border border-slate-700 flex items-center justify-center text-cyan-200 hover:border-cyan-500/40"
+                          aria-label="Play generated audio"
+                        >
+                          {isPlayingResult ? <Pause size={12} /> : <Play size={12} />}
+                        </button>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[10px] text-slate-300 font-bold truncate">Generated Audio</div>
+                          <div className="mt-0.5 flex items-center gap-2">
+                            <div className="text-[10px] text-slate-500 tabular-nums leading-none">
+                              {formatTime(resultCurrentTime)} / {formatTime(resultDuration)}
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={resultDuration || 0}
+                              step={0.01}
+                              value={Math.min(resultCurrentTime, resultDuration || 0)}
+                              onChange={(e) => {
+                                const el = resultAudioRef.current;
+                                if (!el) return;
+                                el.currentTime = Number(e.target.value);
+                              }}
+                              className="flex-1 accent-cyan-400 clone-preview-range"
+                              style={{ height: 2 }}
+                            />
+                          </div>
+                        </div>
+
+                        <audio
+                          ref={resultAudioRef}
+                          src={selectedAudioUrl}
+                          preload="metadata"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <>
@@ -3001,7 +3259,15 @@ const SuperIpView = () => {
                   <div className="space-y-4">
                     {audioHistory.map((audio, index) => (
                       (() => {
-                        const isSelected = !!selectedAudioUrl && selectedAudioUrl === audio.file_url;
+                        const isSelected =
+                          (selectedAudioHistoryId !== null &&
+                            selectedAudioHistoryId !== undefined &&
+                            (audio as any)?.id !== undefined &&
+                            (audio as any)?.id !== null &&
+                            String((audio as any).id) === String(selectedAudioHistoryId)) ||
+                          (!!selectedAudioUrl &&
+                            normalizeUrlForCompare(selectedAudioUrl) ===
+                              normalizeUrlForCompare((audio as any)?.file_url || (audio as any)?.url || (audio as any)?.audio_url));
 
                         return (
                       <motion.div
@@ -3069,7 +3335,7 @@ const SuperIpView = () => {
 
                           {/* Select Button */}
                           <button
-                            onClick={() => handleSelectAudio(audio.file_url)}
+                            onClick={() => handleSelectAudioHistoryItem(audio)}
                             disabled={isSelected}
                             className={cn(
                               "flex-shrink-0 px-3 py-1.5 rounded-lg border text-[9px] font-bold transition-all",
