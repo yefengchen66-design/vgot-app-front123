@@ -2620,6 +2620,8 @@
 
 :root {
   --font-size: 16px;
+  /* Global micro text scale (for very small helper/counter text on mobile). */
+  --micro-text-scale: .78;
   --background: #fff;
   --foreground: oklch(.145 0 0);
   --card: #fff;
@@ -2698,6 +2700,20 @@
 
 html {
   font-size: var(--font-size);
+}
+
+/*
+  Micro text: some mobile browsers round very small px font sizes,
+  so text-[6px]/text-[7px] can look unchanged.
+  This class shrinks via transform in addition to font-size.
+*/
+.micro-text {
+  font-size: 12px !important;
+  line-height: 1.1 !important;
+  letter-spacing: 0 !important;
+  transform: scale(var(--micro-text-scale));
+  transform-origin: right bottom;
+  display: inline-block;
 }
 
 @property --tw-translate-x {

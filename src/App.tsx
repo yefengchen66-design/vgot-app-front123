@@ -1,5 +1,14 @@
 import { uploadSuperIpAudio } from "./lib/superIpAudioUpload";
 import React, { useState, useEffect, useRef } from "react";
+
+// Stable <img> that won’t remount when SuperIpView rerenders.
+// Defining this at module scope avoids recreating the memo component each render,
+// which can otherwise still cause image flicker.
+const StableImage = React.memo(
+  ({ src, alt, className }: { src: string; alt: string; className?: string }) => (
+    <img src={src} alt={alt} className={className} draggable={false} />
+  ),
+);
 import { api } from "./lib/api";
 import {
   Check,
@@ -36,6 +45,7 @@ import {
   Film,
   PenTool,
   Send,
+  RefreshCw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { createPortal } from "react-dom";
@@ -955,6 +965,56 @@ const SuperIpView = () => {
   const [isUploadingSuperIpAudio, setIsUploadingSuperIpAudio] = useState(false);
   const [localUploadedAudioName, setLocalUploadedAudioName] = useState<string | null>(null);
 
+  // Dual-track upload state (mirrors desktop SuperIP): keep both remote URL (supabase) and local base64
+  // so downstream APIs can use either form depending on backend requirements.
+  const [characterImageBase64, setCharacterImageBase64] = useState<string | null>(null);
+  const [audioBase64, setAudioBase64] = useState<string | null>(null);
+
+
+  // --- VOICE workbench (backend wired, aligned with desktop SuperIP) ---
+  type VoiceItem = {
+    voice_id?: string;
+    id?: string;
+    name?: string;
+    display_name?: string;
+    source_type?: string;
+    [k: string]: any;
+  };
+  type VoiceBuckets = {
+    system?: VoiceItem[];
+    custom?: VoiceItem[];
+    clone?: VoiceItem[];
+    other?: VoiceItem[];
+  };
+
+  const [showVoiceModelDialog, setShowVoiceModelDialog] = useState(false);
+  const [voiceDialogTab, setVoiceDialogTab] = useState<"system" | "custom" | "clone">("system");
+  const [loadingVoiceModels, setLoadingVoiceModels] = useState(false);
+  const [voiceModelError, setVoiceModelError] = useState<string | null>(null);
+  const [availableVoices, setAvailableVoices] = useState<VoiceBuckets>({});
+  const [selectedVoiceModel, setSelectedVoiceModel] = useState<VoiceItem | null>(null);
+  const [overrideVoiceId, setOverrideVoiceId] = useState<string>("");
+
+  const [analyzedPrompt, setAnalyzedPrompt] = useState<string>("");
+  const [trialText, setTrialText] = useState<string>("Hey! I'm in a great mood today. How about you?");
+  const [trialAudio, setTrialAudio] = useState<string>("");
+  const [voiceId, setVoiceId] = useState<string>("");
+
+  const [isAnalyzingVoice, setIsAnalyzingVoice] = useState(false);
+  const [isGeneratingTrial, setIsGeneratingTrial] = useState(false);
+  const [isPlayingTrial, setIsPlayingTrial] = useState(false);
+  const trialAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [trialAudioUrl, setTrialAudioUrl] = useState<string>("");
+
+  const cloneInputRef = useRef<HTMLInputElement>(null);
+  const [cloneUploading, setCloneUploading] = useState(false);
+  const [cloneFileId, setCloneFileId] = useState<string>("");
+  const [cloneAudioUrl, setCloneAudioUrl] = useState<string>("");
+  const [isCloningPreview, setIsCloningPreview] = useState(false);
+  const [cloneDisplayName, setCloneDisplayName] = useState<string>("");
+  const [showCloneRename, setShowCloneRename] = useState(false);
+  const [cloneRenameDraft, setCloneRenameDraft] = useState<string>("");
+
   // 图库相关状态
   const [showGallery, setShowGallery] = useState(false);
   const [galleryImages, setGalleryImages] = useState<any[]>([]);
@@ -980,6 +1040,8 @@ const SuperIpView = () => {
   >(null);
   // 上传框里显示的「选中角色」图片（与结果区解耦）
   const [selectedCharacterImage, setSelectedCharacterImage] = useState<string | null>(null);
+  const characterUploadInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingCharacterImage, setIsUploadingCharacterImage] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<
     string | null
   >(null);
@@ -1134,6 +1196,63 @@ const SuperIpView = () => {
     loadGalleryImages();
   };
 
+  const handlePickCharacterImage = () => {
+    if (isUploadingCharacterImage) return;
+    if (characterUploadInputRef.current) {
+      // allow selecting the same file again
+      characterUploadInputRef.current.value = "";
+      characterUploadInputRef.current.click();
+    }
+  };
+
+  const handleCharacterImageSelected = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Guard: only allow images
+    if (!file.type?.startsWith("image/")) {
+      alert("请选择图片文件");
+      return;
+    }
+
+    setIsUploadingCharacterImage(true);
+    try {
+      // Track B: local base64 (data URL) for APIs that need inline upload
+      try {
+        const b64 = await fileToDataUrl(file);
+        setCharacterImageBase64(b64);
+      } catch {
+        // ignore base64 failure; URL track still works
+        setCharacterImageBase64(null);
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("folder", "images");
+
+      const uploadRes = await api.post("/api/supabase/upload", formData);
+      if (!uploadRes?.success) {
+        alert(uploadRes?.error || "上传失败");
+        return;
+      }
+      const url = uploadRes?.url;
+      if (!url) {
+        alert("上传失败：未返回 url");
+        return;
+      }
+
+      setSelectedCharacterImage(url);
+      // Note: per product requirement, local uploads should NOT be stored into the gallery.
+      // Gallery is reserved for generated assets / history items.
+    } catch (err: any) {
+      alert(err?.message || "上传失败");
+    } finally {
+      setIsUploadingCharacterImage(false);
+    }
+  };
+
   // 选择图库中的图片
   const handleSelectGalleryImage = (imageUrl: string) => {
     // 选中图库图片：只填充「上传角色」框（不影响结果区）
@@ -1198,6 +1317,7 @@ const SuperIpView = () => {
     setSelectedAudioUrl(null);
     setSelectedAudio(null);
     setLocalUploadedAudioName(null);
+    setAudioBase64(null);
     if (audioUploadInputRef.current) audioUploadInputRef.current.value = "";
   };
 
@@ -1205,6 +1325,7 @@ const SuperIpView = () => {
   const handleClearLocalAudioUpload = () => {
     setSelectedAudioUrl(null);
     setLocalUploadedAudioName(null);
+    setAudioBase64(null);
     if (audioUploadInputRef.current) audioUploadInputRef.current.value = "";
   };
 
@@ -1225,6 +1346,14 @@ const SuperIpView = () => {
 
     setIsUploadingSuperIpAudio(true);
     try {
+      // Track B: base64 (data URL) for APIs that may require inline audio
+      try {
+        const b64 = await fileToDataUrl(file);
+        setAudioBase64(b64);
+      } catch {
+        setAudioBase64(null);
+      }
+
       const result = await uploadSuperIpAudio(file, api.post);
       if ("error" in result) {
         alert(result.error);
@@ -1239,6 +1368,19 @@ const SuperIpView = () => {
       setIsUploadingSuperIpAudio(false);
     }
   };
+
+  const clearCharacterSelection = () => {
+    setSelectedCharacterImage(null);
+    setCharacterImageBase64(null);
+  };
+
+  const fileToDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("read failed"));
+      reader.readAsDataURL(file);
+    });
 
   // 播放/暂停音频
   const toggleAudioPlay = (audioUrl: string) => {
@@ -1271,9 +1413,7 @@ const SuperIpView = () => {
       <button
         type="button"
         onClick={() => {
-          if (!selectedImage || allowOpenWhenSelected) {
-            handleOpenGallery();
-          }
+          if (!selectedImage || allowOpenWhenSelected) handlePickCharacterImage();
         }}
         className={cn(
           "w-16 h-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed rounded-lg bg-slate-950/30 transition-all cursor-pointer group relative overflow-hidden",
@@ -1283,9 +1423,16 @@ const SuperIpView = () => {
         )}
         aria-label={selectedImage ? "Selected character" : "Upload character"}
       >
+        <input
+          type="file"
+          ref={characterUploadInputRef}
+          style={{ display: "none" }}
+          accept="image/*"
+          onChange={handleCharacterImageSelected}
+        />
         {selectedImage ? (
           <>
-            <img
+            <StableImage
               src={selectedImage}
               alt="Selected character"
               className="absolute inset-0 w-full h-full object-cover opacity-90"
@@ -1295,7 +1442,7 @@ const SuperIpView = () => {
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                setSelectedCharacterImage(null);
+                clearCharacterSelection();
               }}
               aria-label="Clear selected character"
               className="absolute top-0 right-0 translate-x-1/4 -translate-y-1/4 z-30 px-1 text-white text-sm leading-none hover:text-slate-200 transition"
@@ -1311,12 +1458,398 @@ const SuperIpView = () => {
               className="text-slate-600 group-hover:text-cyan-400 transition-colors"
             />
             <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
-              上传角色
+              {isUploadingCharacterImage ? "上传中..." : "上传角色"}
             </span>
           </>
         )}
       </button>
     );
+  };
+
+  const voiceItemLabel = (v: VoiceItem) =>
+    (v?.display_name || v?.name || v?.voice_id || v?.id || "Voice").toString();
+
+  const stopTrialPlayback = () => {
+    try {
+      if (trialAudioRef.current) {
+        trialAudioRef.current.pause();
+        trialAudioRef.current.currentTime = 0;
+      }
+    } catch {
+      // ignore
+    }
+    setIsPlayingTrial(false);
+  };
+
+  const hexToObjectUrl = (hexString: string, mime = "audio/mpeg"): string => {
+    const clean = (hexString || "").trim();
+    if (!clean) return "";
+    const bytes = new Uint8Array(Math.floor(clean.length / 2));
+    for (let i = 0; i < clean.length; i += 2) {
+      bytes[i / 2] = parseInt(clean.slice(i, i + 2), 16);
+    }
+    const blob = new Blob([bytes], { type: mime });
+    return URL.createObjectURL(blob);
+  };
+
+  const getTrialAudioPlayableUrl = (trial: string): string => {
+    const t = (trial || "").trim();
+    if (!t) return "";
+    if (/^https?:\/\//i.test(t) || t.startsWith("/")) return t;
+    // if it looks like hex (desktop uses hex)
+    if (/^[0-9a-fA-F]+$/.test(t) && t.length > 100) {
+      return hexToObjectUrl(t);
+    }
+    // last resort: treat as url-ish
+    return t;
+  };
+
+  const playTrial = (trial: string) => {
+    const nextUrl = getTrialAudioPlayableUrl(trial);
+    if (!nextUrl) {
+      alert("暂无试听音频");
+      return;
+    }
+
+    // if it was a previous blob url, revoke it
+    if (trialAudioUrl && trialAudioUrl.startsWith("blob:")) {
+      try {
+        URL.revokeObjectURL(trialAudioUrl);
+      } catch {
+        // ignore
+      }
+    }
+
+    setTrialAudioUrl(nextUrl);
+    if (!trialAudioRef.current) {
+      trialAudioRef.current = new Audio();
+    }
+    const a = trialAudioRef.current;
+    a.src = nextUrl;
+    a.onended = () => {
+      setIsPlayingTrial(false);
+    };
+    a.onerror = () => {
+      setIsPlayingTrial(false);
+    };
+
+    a.play()
+      .then(() => setIsPlayingTrial(true))
+      .catch(() => {
+        setIsPlayingTrial(false);
+        alert("试听播放失败");
+      });
+  };
+
+  const analyzeVoiceFromCharacter = async (): Promise<string> => {
+    if (!selectedCharacterImage) {
+      alert("请先选择角色图片");
+      return "";
+    }
+    if (isAnalyzingVoice) return analyzedPrompt;
+    setIsAnalyzingVoice(true);
+    try {
+      // Dual-track: prefer base64 if present (desktop uses a base64 track for some backends),
+      // but keep image_url for backward compatibility.
+      const payload: any = {
+        image_url: selectedCharacterImage,
+        ...(characterImageBase64 ? { image_base64: characterImageBase64 } : {}),
+      };
+      const res: any = await api.post("/api/voice/design", payload);
+
+      // desktop returns choices[0].message.content or other structures
+      let prompt = "";
+      if (res?.choices?.[0]?.message?.content) prompt = String(res.choices[0].message.content);
+      else if (res?.prompt) prompt = String(res.prompt);
+      else if (res?.data?.prompt) prompt = String(res.data.prompt);
+
+      if (!prompt) {
+        alert("分析失败：未返回提示词");
+        return "";
+      }
+      setAnalyzedPrompt(prompt);
+      return prompt;
+    } catch (e: any) {
+      alert(e?.message || "分析失败");
+      return "";
+    } finally {
+      setIsAnalyzingVoice(false);
+    }
+  };
+
+  const generateTrialAudio = async (): Promise<void> => {
+    const startedAt = Date.now();
+    const ensureMinLoading = async () => {
+      const elapsed = Date.now() - startedAt;
+      const minMs = 650; // ensure users can actually see the spinner
+      if (elapsed < minMs) {
+        await new Promise((r) => setTimeout(r, minMs - elapsed));
+      }
+    };
+
+    // If preconditions block generation, don't enter loading state.
+    // (Most "no spinner" reports are because we returned early here.)
+    if (overrideVoiceId || selectedVoiceModel) {
+      alert("已选择音色。请先清除/取消选择后再生成波形试听");
+      return;
+    }
+    const prompt = analyzedPrompt || (await analyzeVoiceFromCharacter());
+    if (!prompt) return;
+    if (!trialText || !trialText.trim()) {
+      alert("请输入试听文本");
+      return;
+    }
+    if (isGeneratingTrial) return;
+    setIsGeneratingTrial(true);
+    console.log("[SuperIP][VOICE] Match start");
+    try {
+      const res: any = await api.post("/api/avatar/shiting", {
+        prompt,
+        text: trialText,
+      });
+      const extractedVoiceId =
+        res?.voice_id || res?.voiceId || res?.data?.voice_id || res?.data?.voiceId || res?.voice?.id || "";
+      const ta = res?.trial_audio || res?.data?.trial_audio || res?.trialAudio || "";
+      if (ta) setTrialAudio(String(ta));
+      if (extractedVoiceId) setVoiceId(String(extractedVoiceId));
+      stopTrialPlayback();
+    } catch (e: any) {
+      alert(e?.message || "生成试听失败");
+    } finally {
+      await ensureMinLoading();
+      console.log("[SuperIP][VOICE] Match end");
+      setIsGeneratingTrial(false);
+    }
+  };
+
+  const clearVoiceWorkbenchSource = () => {
+    stopTrialPlayback();
+    if (trialAudioUrl && trialAudioUrl.startsWith("blob:")) {
+      try {
+        URL.revokeObjectURL(trialAudioUrl);
+      } catch {
+        // ignore
+      }
+    }
+    setTrialAudioUrl("");
+    setTrialAudio("");
+    setVoiceId("");
+    // Don't clear analyzedPrompt here.
+    // Clearing it forces re-analysis / rerender paths that can flicker the character tile.
+  };
+
+  const clearSelectedVoiceModel = () => {
+    setSelectedVoiceModel(null);
+    setOverrideVoiceId("");
+  };
+
+  const clearClone = () => {
+    setCloneFileId("");
+    setCloneAudioUrl("");
+    setCloneDisplayName("");
+    setShowCloneRename(false);
+    setCloneRenameDraft("");
+    // If using clone as voice source (no selection + no trial), also clear voiceId
+    if (!overrideVoiceId && !trialAudio) {
+      setVoiceId("");
+    }
+  };
+
+  const openVoiceModelDialog = async () => {
+    // Desktop parity (Vgot_front): when trial audio (waveform source) exists,
+    // selecting a voice model should be blocked until the trial source is cleared.
+    if (trialAudio || voiceId || isGeneratingTrial) {
+      return;
+    }
+    setShowVoiceModelDialog(true);
+    if (loadingVoiceModels) return;
+    await fetchVoiceModels();
+  };
+
+  const fetchVoiceModels = async () => {
+    setLoadingVoiceModels(true);
+    setVoiceModelError(null);
+    try {
+      const [all, reg] = await Promise.all([
+        api.get<any>("/api/all_audio"),
+        api.get<any>("/api/voices/custom").catch(() => null),
+      ]);
+
+      const registry = reg && Array.isArray(reg?.voices) ? reg.voices : [];
+      const myVoiceIds = new Set<string>(registry.map((v: any) => String(v.voice_id || v.id || "")).filter(Boolean));
+      const myCloneIds = new Set<string>(
+        registry
+          .filter((v: any) => (v?.source_type === "clone" || v?.source_type === "cloning"))
+          .map((v: any) => String(v.voice_id || v.id || ""))
+          .filter(Boolean),
+      );
+
+      const allObj = all && typeof all === "object" ? all : {};
+      const systemList: VoiceItem[] = Array.isArray((allObj as any).system_voice)
+        ? (allObj as any).system_voice
+        : [];
+      const generationList: VoiceItem[] = Array.isArray((allObj as any).voice_generation)
+        ? (allObj as any).voice_generation
+        : [];
+      const cloningList: VoiceItem[] = Array.isArray((allObj as any).voice_cloning)
+        ? (allObj as any).voice_cloning
+        : [];
+
+      const custom: VoiceItem[] = generationList.filter((v: any) => myVoiceIds.has(String(v.voice_id || v.id || "")));
+      const other: VoiceItem[] = generationList.filter((v: any) => !myVoiceIds.has(String(v.voice_id || v.id || "")));
+      // Desktop logic: clone list uses voice_cloning directly
+      const clone: VoiceItem[] = cloningList.length
+        ? cloningList
+        : generationList.filter((v: any) => myCloneIds.has(String(v.voice_id || v.id || "")));
+
+      setAvailableVoices({
+        system: systemList,
+        custom,
+        clone,
+        other,
+      });
+    } catch (e: any) {
+      setVoiceModelError(e?.message || "加载音色失败");
+      setAvailableVoices({});
+    } finally {
+      setLoadingVoiceModels(false);
+    }
+  };
+
+  const handleSelectVoiceModel = (v: VoiceItem) => {
+    // mutual exclusion: if already has trial/clone, require clear first
+    if (trialAudio || voiceId) {
+      alert("已有试听/波形来源，请先清除后再选择音色");
+      return;
+    }
+    if (cloneFileId || cloneAudioUrl) {
+      alert("已有克隆音色来源，请先清除后再选择音色");
+      return;
+    }
+    setSelectedVoiceModel(v);
+    const vid = (v.voice_id || v.id || "").toString();
+    setOverrideVoiceId(vid);
+    setShowVoiceModelDialog(false);
+  };
+
+  const handleCloneFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const lower = (file.name || "").toLowerCase();
+    const ok = lower.endsWith(".mp3") || lower.endsWith(".m4a") || lower.endsWith(".wav");
+    if (!ok) {
+      alert("Only mp3/m4a/wav are allowed");
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      alert("File too large (>20MB)");
+      return;
+    }
+
+    // mutual exclusion: cannot clone if has selected voice or trial source
+    if (overrideVoiceId || selectedVoiceModel) {
+      alert("已选择音色，清除后才能使用克隆");
+      return;
+    }
+    if (trialAudio || voiceId) {
+      alert("已有波形/试听结果，清除后才能使用克隆");
+      return;
+    }
+
+    setCloneUploading(true);
+    try {
+      // Dual-track (optional): keep local base64 for backends that require inline cloning audio.
+      // We store it into audioBase64 as a best-effort helper; clone upload still uses the file.
+      try {
+        const b64 = await fileToDataUrl(file);
+        setAudioBase64(b64);
+      } catch {
+        // ignore
+      }
+
+      const fd = new FormData();
+      fd.append("file", file);
+      const resp: any = await api.post("/api/voice/clone/upload", fd);
+      const fid = resp?.file?.file_id || resp?.file_id || resp?.data?.file_id || "";
+      if (!fid) throw new Error("Upload failed: no file_id");
+      setCloneFileId(String(fid));
+      setCloneAudioUrl("");
+    } catch (err: any) {
+      alert(err?.message || "Upload failed");
+    } finally {
+      setCloneUploading(false);
+    }
+  };
+
+
+  const doClonePreview = async () => {
+    if (!cloneFileId) {
+      alert("Please upload an audio file for cloning first");
+      return;
+    }
+    setIsCloningPreview(true);
+    try {
+      const payload: any = {
+        file_id: cloneFileId,
+        text: "This voice sounds natural and pleasant.",
+        auto_name: true,
+      };
+      const resp: any = await api.post("/api/voice/clone/preview", payload);
+      let audioUrl = resp?.data?.audio || resp?.audio || resp?.url || "";
+      if (!audioUrl && resp?.output && Array.isArray(resp.output)) {
+        const first = resp.output.find((x: any) => x?.audio || x?.url);
+        audioUrl = first?.audio || first?.url || "";
+      }
+      const vid = resp?.voice_id || resp?.data?.voice_id || "";
+      if (audioUrl) {
+        setCloneAudioUrl(String(audioUrl));
+        if (vid) setVoiceId(String(vid));
+      } else {
+        alert(resp?.error || "Clone preview failed");
+      }
+    } catch (e: any) {
+      alert(e?.message || "Clone preview failed");
+    } finally {
+      setIsCloningPreview(false);
+    }
+  };
+
+  const handleGenerateVoice = async () => {
+    if (!voiceText || !voiceText.trim()) {
+      alert("请输入文本");
+      return;
+    }
+    const effectiveVoiceId = overrideVoiceId || voiceId || "";
+    if (!effectiveVoiceId) {
+      alert("请先选择音色/生成试听/克隆音色");
+      return;
+    }
+
+    setIsGenerating(true);
+    try {
+      const source_type = overrideVoiceId ? "system" : "waveform";
+      const res: any = await api.post("/api/audio/synthesize", {
+        text: voiceText,
+        voice_id: effectiveVoiceId,
+        source_type,
+      });
+
+      let audioUrl = res?.data?.audio || res?.audio || res?.url || "";
+      if (!audioUrl && res?.data?.url) audioUrl = res.data.url;
+      if (!audioUrl) {
+        alert("合成失败：未返回音频");
+        return;
+      }
+
+      // Reuse existing “selected audio url” box to show chosen/generated audio
+      setSelectedAudioUrl(String(audioUrl));
+      setSelectedAudio({ name: "generated_audio.mp3", url: String(audioUrl) });
+      setGeneratedAudio(true);
+    } catch (e: any) {
+      alert(e?.message || "合成失败");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -1728,31 +2261,108 @@ const SuperIpView = () => {
                 <label className="ui-tiny uppercase text-slate-400 font-bold">
                   Voice Waveform
                 </label>
-                <div className="flex gap-2">
-                  {/* Waveform Display Area - Canvas 波形显示区域 */}
-                  <div className="flex-1 bg-slate-950/50 border border-slate-700 rounded-lg flex items-center justify-center h-9 overflow-hidden">
-                    {/* 波形动画显示区域（暂时为空，可以后续添加canvas动画） */}
-                    <div className="flex items-center gap-0.5 h-full px-2">
-                      {[...Array(30)].map((_, i) => (
-                        <div
-                          key={i}
-                          className="w-0.5 bg-slate-700 rounded-full transition-all"
-                          style={{
-                            height: `${Math.random() * 60 + 20}%`,
-                            opacity: 0.3
-                          }}
-                        />
-                      ))}
+                <div className="flex gap-2 items-center">
+                  {/* Waveform Display Area - matching时不收缩 */}
+                  <div
+                    className={cn(
+                      "bg-slate-950/50 border border-slate-700 rounded-lg flex items-center h-9 overflow-hidden",
+                      "flex-1",
+                    )}
+                  >
+                    <div className="flex items-center justify-between w-full px-2">
+                      {isGeneratingTrial ? (
+                        <div className="flex items-center gap-0.5 h-5">
+                          {[...Array(28)].map((_, i) => (
+                            <div
+                              key={i}
+                              className="w-0.5 bg-cyan-200/80 rounded-full animate-pulse"
+                              style={{
+                                // deterministic-ish waveform: fixed pattern by index
+                                height: `${18 + ((i * 17) % 60)}%`,
+                                animationDelay: `${i * 0.03}s`,
+                              }}
+                            />
+                          ))}
+                        </div>
+                      ) : trialAudio ? (
+                        <div className="px-2 text-[10px] text-slate-300 truncate">Trial ready</div>
+                      ) : (
+                        <div className="px-2 text-[10px] text-slate-600 truncate">
+                          {analyzedPrompt ? "Prompt ready" : "No trial generated"}
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <button className="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-cyan-400 hover:bg-slate-700 hover:border-cyan-500/50 transition-colors">
-                    <Play size={14} />
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!trialAudio) {
+                        generateTrialAudio();
+                        return;
+                      }
+                      if (isPlayingTrial) {
+                        stopTrialPlayback();
+                        return;
+                      }
+                      playTrial(trialAudio);
+                    }}
+                    disabled={!!overrideVoiceId || !!selectedVoiceModel || !!cloneFileId || isGeneratingTrial}
+                    className={cn(
+                      "w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center transition-colors",
+                      (overrideVoiceId || selectedVoiceModel || cloneFileId)
+                        ? "text-slate-600 cursor-not-allowed"
+                        : "text-cyan-400 hover:bg-slate-700 hover:border-cyan-500/50",
+                    )}
+                    title={trialAudio ? "Play/Pause" : "Generate trial"}
+                  >
+                    {trialAudio && isPlayingTrial ? <Pause size={14} /> : <Play size={14} />}
                   </button>
-                  <button className="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 hover:bg-slate-700 hover:text-white transition-colors">
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearVoiceWorkbenchSource();
+                    }}
+                    disabled={!trialAudio && !analyzedPrompt && !voiceId}
+                    className={cn(
+                      "w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center transition-colors",
+                      (!trialAudio && !analyzedPrompt && !voiceId)
+                        ? "text-slate-600 cursor-not-allowed"
+                        : "text-slate-300 hover:bg-slate-700 hover:text-white",
+                    )}
+                    title="Clear trial/prompt"
+                  >
                     <X size={14} />
                   </button>
-                  <button className="px-3 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center ui-tiny font-bold text-cyan-400 hover:bg-slate-700 hover:border-cyan-500/50 transition-colors">
-                    Match
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isGeneratingTrial) return;
+                      generateTrialAudio();
+                    }}
+                    disabled={!!overrideVoiceId || !!selectedVoiceModel || !!cloneFileId}
+                    className={cn(
+                      "px-3 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center ui-tiny font-bold transition-colors relative",
+                      (overrideVoiceId || selectedVoiceModel || cloneFileId)
+                        ? "text-slate-600 cursor-not-allowed"
+                        : "text-cyan-400 hover:bg-slate-700 hover:border-cyan-500/50",
+                    )}
+                    title="Analyze + Trial (Match)"
+                  >
+                    {/* Keep a stable layout; we overlay the spinner so it's never clipped or collapsed. */}
+                    <span className={cn("transition-opacity", isGeneratingTrial ? "opacity-0" : "opacity-100")}>
+                      Match
+                    </span>
+                    {isGeneratingTrial && (
+                      <span className="absolute inset-0 flex items-center justify-center opacity-100">
+                        <span
+                          className="w-5 h-5 border-[3px] border-cyan-300 border-t-transparent rounded-full animate-spin"
+                          style={{ filter: "drop-shadow(0 0 8px rgba(34, 211, 238, 1))" }}
+                        />
+                      </span>
+                    )}
                   </button>
                 </div>
               </div>
@@ -1763,16 +2373,40 @@ const SuperIpView = () => {
                   Select Voice
                 </label>
                 <button
-                  onClick={handleOpenAudioGallery}
-                  className="w-full py-3 bg-slate-950/50 border border-slate-700 rounded-lg flex items-center justify-center gap-2 text-slate-300 hover:text-white hover:border-cyan-500/50 transition-colors group"
+                  onClick={openVoiceModelDialog}
+                  disabled={!!trialAudio || !!voiceId || isGeneratingTrial}
+                  className={cn(
+                    "w-full py-3 bg-slate-950/50 border border-slate-700 rounded-lg flex items-center transition-colors group relative",
+                    (trialAudio || voiceId || isGeneratingTrial)
+                      ? "text-slate-600 cursor-not-allowed"
+                      : "text-slate-300 hover:text-white hover:border-cyan-500/50",
+                  )}
                 >
-                  <Volume2
-                    size={16}
-                    className="text-slate-500 group-hover:text-cyan-400 transition-colors"
-                  />
-                  <span className="ui-tiny font-bold">
-                    Select Voice Model
+                  <span className="flex-1 flex items-center justify-center gap-2">
+                    <Volume2
+                      size={16}
+                      className="text-slate-500 group-hover:text-cyan-400 transition-colors"
+                    />
+                    <span className="ui-tiny font-bold">
+                      {overrideVoiceId ? `Selected: ${overrideVoiceId}` : "Select Voice Model"}
+                    </span>
                   </span>
+
+                  {(overrideVoiceId || selectedVoiceModel) && !(trialAudio || voiceId || isGeneratingTrial) && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        clearSelectedVoiceModel();
+                      }}
+                      aria-label="Clear selected voice"
+                      className="absolute top-1/2 right-2 -translate-y-1/2 w-6 h-6 text-slate-300 text-[14px] leading-none flex items-center justify-center hover:text-white"
+                      style={{ textShadow: "0 0 6px rgba(0,0,0,0.75)" }}
+                    >
+                      ×
+                    </button>
+                  )}
                 </button>
               </div>
 
@@ -1781,19 +2415,142 @@ const SuperIpView = () => {
                 <label className="ui-tiny uppercase text-slate-400 font-bold">
                   Voice Cloning
                 </label>
-                <div className="h-24 border border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center bg-slate-950/50 hover:border-cyan-500/50 transition-colors cursor-pointer group relative overflow-hidden">
-                  <div className="absolute inset-0 bg-cyan-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  <Upload
-                    className="text-slate-500 group-hover:text-cyan-400 mb-2 transition-colors"
-                    size={16}
-                  />
-                  <span className="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">
-                    Select File (mp3/wav/m4a)
-                  </span>
-                  <span className="text-[8px] text-slate-600 mt-1">
-                    10s~300s, ≤20MB
-                  </span>
+                <input
+                  type="file"
+                  ref={cloneInputRef}
+                  style={{ display: "none" }}
+                  accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/*"
+                  onChange={handleCloneFileChange}
+                />
+
+                <div className="flex items-stretch gap-2">
+                  <div
+                    onClick={() => {
+                      if (cloneUploading) return;
+                      if (overrideVoiceId || selectedVoiceModel) return;
+                      if (trialAudio || voiceId) return;
+                      if (cloneFileId) return; // already has file
+                      if (cloneInputRef.current) cloneInputRef.current.value = "";
+                      cloneInputRef.current?.click();
+                    }}
+                    className={cn(
+                      "flex-1 h-24 border border-dashed border-slate-700 rounded-lg flex items-center bg-slate-950/50 transition-colors cursor-pointer group relative overflow-hidden",
+                      (overrideVoiceId || selectedVoiceModel || trialAudio || voiceId)
+                        ? "opacity-60 cursor-not-allowed"
+                        : "hover:border-cyan-500/50",
+                      cloneFileId ? "border-slate-600" : "",
+                    )}
+                  >
+                    <div className="absolute inset-0 bg-cyan-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <div className="flex items-center gap-2 px-3 w-full">
+                      <div className="w-10 h-10 rounded-lg bg-slate-900/60 border border-slate-700 flex items-center justify-center">
+                        {cloneFileId ? (
+                          <Volume2 size={16} className="text-slate-300" />
+                        ) : (
+                          <Upload size={16} className="text-slate-500 group-hover:text-cyan-400 transition-colors" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[10px] text-slate-300 font-bold truncate">
+                          {cloneFileId ? (cloneDisplayName || "clone.mp3") : "Select File (mp3/wav/m4a)"}
+                        </div>
+                        <div className="micro-text text-slate-600 truncate">
+                          {cloneUploading
+                            ? "Uploading..."
+                            : cloneFileId
+                              ? (cloneAudioUrl ? "Ready" : "Uploaded")
+                              : "10s~300s, ≤20MB"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right-side actions (reserve a little space) */}
+                  <div className="flex flex-col justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={doClonePreview}
+                      disabled={!cloneFileId || isCloningPreview}
+                      title={cloneAudioUrl ? "Re-Preview" : "Preview"}
+                      className={cn(
+                        "w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center transition-colors",
+                        (!cloneFileId)
+                          ? "text-slate-600 cursor-not-allowed"
+                          : isCloningPreview
+                            ? "text-slate-600 cursor-not-allowed"
+                            : "text-cyan-300 hover:bg-slate-700 hover:border-cyan-500/50",
+                      )}
+                    >
+                      {isCloningPreview ? (
+                        <span
+                          className="w-3.5 h-3.5 border-[3px] border-cyan-300 border-t-transparent rounded-full animate-spin"
+                          style={{ filter: "drop-shadow(0 0 8px rgba(34, 211, 238, 1))" }}
+                        />
+                      ) : cloneAudioUrl ? (
+                        <RefreshCw size={14} />
+                      ) : (
+                        <Play size={14} />
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!cloneFileId) return;
+                        setShowCloneRename((v) => !v);
+                        setCloneRenameDraft(cloneDisplayName || "clone.mp3");
+                      }}
+                      title="Rename"
+                      className={cn(
+                        "w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center transition-colors",
+                        (!cloneFileId || cloneUploading)
+                          ? "text-slate-600 cursor-not-allowed"
+                          : "text-slate-300 hover:bg-slate-700 hover:text-white",
+                      )}
+                      disabled={!cloneFileId || cloneUploading}
+                    >
+                      <Settings size={14} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={clearClone}
+                      disabled={!cloneFileId && !cloneAudioUrl}
+                      title="Clear"
+                      className={cn(
+                        "w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center transition-colors",
+                        (!cloneFileId && !cloneAudioUrl)
+                          ? "text-slate-600 cursor-not-allowed"
+                          : "text-slate-300 hover:bg-rose-500/10 hover:border-rose-400/40 hover:text-rose-200",
+                      )}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
+
+                {showCloneRename && (
+                  <div className="mt-2 rounded-lg bg-slate-950/40 border border-slate-700 p-2 flex items-center gap-2">
+                    <input
+                      value={cloneRenameDraft}
+                      onChange={(e) => setCloneRenameDraft(e.target.value)}
+                      className="flex-1 bg-slate-900/40 border border-slate-700 rounded-md px-2 py-1 text-[10px] text-white outline-none focus:border-cyan-500/50"
+                      placeholder="Rename"
+                    />
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-200 text-[10px] font-bold hover:bg-cyan-500/20"
+                      onClick={() => {
+                        const next = (cloneRenameDraft || "").trim();
+                        if (!next) return;
+                        setCloneDisplayName(next);
+                        setShowCloneRename(false);
+                      }}
+                    >
+                      OK
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Input Text */}
@@ -1811,7 +2568,7 @@ const SuperIpView = () => {
                     placeholder="Enter text to convert to speech..."
                     maxLength={3500}
                   />
-                  <span className="absolute bottom-2 right-2 text-[8px] text-slate-600">
+                  <span className="absolute bottom-2 right-2 micro-text text-slate-600">
                     {voiceText.length}/3500
                   </span>
                 </div>
@@ -1828,7 +2585,8 @@ const SuperIpView = () => {
                 <NeonButton
                   className="flex-1 py-2 text-[10px]"
                   variant="primary"
-                  onClick={() => setGeneratedAudio(true)}
+                  onClick={handleGenerateVoice}
+                  disabled={isGenerating}
                 >
                   <Zap size={14} /> Generate
                 </NeonButton>
@@ -1897,10 +2655,68 @@ const SuperIpView = () => {
                   <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[2px] h-10 bg-slate-500/70 rounded-full" />
 
                   {/* Upload Box 2 - Audio */}
-                  <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
-                    <Volume2 size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
-                    <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
-                      上传音频
+                  <div
+                    onClick={handlePickAudioFile}
+                    className={cn(
+                      "relative w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed rounded-lg transition-all cursor-pointer group h-16",
+                      selectedAudioUrl
+                        ? "border-cyan-500/70 bg-cyan-500/10 shadow-[0_0_12px_rgba(6,182,212,0.18)]"
+                        : "border-slate-700 bg-slate-950/30 hover:border-cyan-500/50",
+                    )}
+                    aria-label={selectedAudioUrl ? "Selected audio" : "Upload audio"}
+                    role="button"
+                  >
+                    <input
+                      type="file"
+                      ref={audioUploadInputRef}
+                      style={{ display: "none" }}
+                      accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/*"
+                      onChange={handleAudioFileSelected}
+                    />
+
+                    {/* Clear selected audio (local upload or history selection) */}
+                    {selectedAudioUrl && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (selectedAudio) {
+                            handleClearSelectedAudio();
+                          } else {
+                            handleClearLocalAudioUpload();
+                          }
+                        }}
+                        aria-label="清除已选择音频"
+                        title="清除"
+                        className="absolute top-0 right-0 translate-x-1/4 -translate-y-1/4 z-30 px-1 text-white text-sm leading-none hover:text-slate-200 transition"
+                        style={{ textShadow: "0 0 6px rgba(0,0,0,0.75)" }}
+                      >
+                        ×
+                      </button>
+                    )}
+
+                    <Volume2
+                      size={18}
+                      className={cn(
+                        "transition-colors",
+                        selectedAudioUrl
+                          ? "text-cyan-300"
+                          : "text-slate-600 group-hover:text-cyan-400",
+                      )}
+                    />
+                    <span
+                      className={cn(
+                        "text-[9px] transition-colors font-medium text-center leading-tight whitespace-nowrap",
+                        selectedAudioUrl
+                          ? "text-cyan-200"
+                          : "text-slate-500 group-hover:text-cyan-400",
+                      )}
+                    >
+                      {selectedAudioUrl ? (
+                        "selected..."
+                      ) : (
+                        isUploadingSuperIpAudio ? "上传中..." : "上传音频"
+                      )}
                     </span>
                   </div>
                 </div>
@@ -2288,6 +3104,171 @@ const SuperIpView = () => {
           </>
         </AnimatePresence>,
         document.body
+      )}
+
+      {/* Voice Model Dialog (system/custom/clone) */}
+      {showVoiceModelDialog && createPortal(
+        <AnimatePresence>
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowVoiceModelDialog(false)}
+              className="fixed inset-0 bg-black/70 backdrop-blur-sm"
+              style={{ zIndex: 999999 }}
+            />
+
+            <motion.div
+              initial={{ opacity: 0, y: '100%' }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: '100%' }}
+              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className="fixed inset-0 bg-[#0f1419] flex flex-col overflow-hidden"
+              style={{ zIndex: 1000000 }}
+            >
+              <div className="flex items-center justify-between px-4 py-3.5 border-b border-slate-800/50 bg-slate-950/60 flex-shrink-0">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <Volume2 size={16} className="text-cyan-400" />
+                  Select Voice Model
+                </h3>
+                <button
+                  onClick={() => setShowVoiceModelDialog(false)}
+                  className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
+                  aria-label="关闭音色选择"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 px-4 py-2 border-b border-slate-800/50 bg-slate-950/40">
+                {([
+                  { key: 'system', label: 'System' },
+                  { key: 'custom', label: 'Custom' },
+                  { key: 'clone', label: 'Clone' },
+                ] as const).map((t) => (
+                  <button
+                    key={t.key}
+                    onClick={() => setVoiceDialogTab(t.key)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all",
+                      voiceDialogTab === t.key
+                        ? "bg-cyan-500/10 border-cyan-500/40 text-cyan-300"
+                        : "bg-slate-900/40 border-slate-800 text-slate-400 hover:text-white",
+                    )}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+
+                <div className="flex-1" />
+                <button
+                  onClick={fetchVoiceModels}
+                  disabled={loadingVoiceModels}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all",
+                    loadingVoiceModels
+                      ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
+                      : "bg-slate-900/40 border-slate-800 text-slate-300 hover:text-white",
+                  )}
+                >
+                  Refresh
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-4 pt-3 pb-4">
+                {loadingVoiceModels ? (
+                  <div className="flex flex-col items-center justify-center py-20">
+                    <div className="w-10 h-10 border-3 border-cyan-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+                    <p className="text-xs text-slate-400 font-medium">加载中...</p>
+                  </div>
+                ) : voiceModelError ? (
+                  <div className="py-10 text-center">
+                    <p className="text-sm text-slate-300 font-medium mb-2">加载失败</p>
+                    <p className="text-xs text-slate-600">{voiceModelError}</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {(() => {
+                      const list =
+                        voiceDialogTab === 'system'
+                          ? (availableVoices.system || [])
+                          : voiceDialogTab === 'custom'
+                            ? (availableVoices.custom || [])
+                            : (availableVoices.clone || []);
+
+                      if (!list.length) {
+                        return (
+                          <div className="flex flex-col items-center justify-center py-20">
+                            <div className="w-16 h-16 rounded-full bg-slate-800/30 flex items-center justify-center mb-3">
+                              <Volume2 size={28} className="text-slate-600" />
+                            </div>
+                            <p className="text-sm text-slate-400 font-medium mb-1">暂无音色</p>
+                            <p className="text-xs text-slate-600">切换 Tab 或刷新试试</p>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="space-y-2">
+                          {list.map((v, idx) => {
+                            const vid = String(v.voice_id || v.id || "");
+                            const isSelected = !!overrideVoiceId && overrideVoiceId === vid;
+                            return (
+                              <button
+                                key={vid || idx}
+                                onClick={() => handleSelectVoiceModel(v)}
+                                className={cn(
+                                  "w-full text-left bg-slate-900/60 border rounded-xl px-4 py-3 transition-all",
+                                  isSelected
+                                    ? "border-2 border-cyan-400 shadow-[0_0_0_2px_rgba(34,211,238,0.25)]"
+                                    : "border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-800/60",
+                                )}
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-xs font-semibold text-white truncate">
+                                      {voiceItemLabel(v)}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 truncate">
+                                      {vid}
+                                    </div>
+                                  </div>
+                                  <span
+                                    className={cn(
+                                      "px-3 py-1.5 rounded-lg border text-[9px] font-bold",
+                                      isSelected
+                                        ? "bg-cyan-500/10 border-cyan-500/30 text-cyan-400"
+                                        : "bg-slate-800 border-slate-700 text-slate-300",
+                                    )}
+                                  >
+                                    {isSelected ? "Selected" : "Select"}
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-shrink-0 p-3 bg-slate-950/80 border-t border-slate-800/50">
+                <button
+                  onClick={() => setShowVoiceModelDialog(false)}
+                  className="w-full py-3 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white font-medium text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
+                >
+                  <X size={18} />
+                  关闭
+                </button>
+              </div>
+            </motion.div>
+          </>
+        </AnimatePresence>,
+        document.body,
       )}
     </div>
   );
