@@ -971,6 +971,16 @@ const SuperIpView = () => {
   const [audioBase64, setAudioBase64] = useState<string | null>(null);
   const [selectedAudioHistoryId, setSelectedAudioHistoryId] = useState<number | string | null>(null);
 
+  // SuperIP Gen (Step 3)
+  const SUPERIP_DEFAULT_DURATION_SEC = 10;
+  const [superIpGenPrompt, setSuperIpGenPrompt] = useState<string>("");
+  const [isStartingSuperIpGen, setIsStartingSuperIpGen] = useState(false);
+  const [isPollingSuperIpGen, setIsPollingSuperIpGen] = useState(false);
+  const [superIpGenTaskId, setSuperIpGenTaskId] = useState<string>("");
+  const [superIpGenResultUrl, setSuperIpGenResultUrl] = useState<string | null>(null);
+  const [superIpGenError, setSuperIpGenError] = useState<string | null>(null);
+  const [superIpVideoHistory, setSuperIpVideoHistory] = useState<any[]>([]);
+
 
   // --- VOICE workbench (backend wired, aligned with desktop SuperIP) ---
   type VoiceItem = {
@@ -1038,6 +1048,8 @@ const SuperIpView = () => {
   const [audioHistory, setAudioHistory] = useState<any[]>([]);
   const [loadingAudioHistory, setLoadingAudioHistory] = useState(false);
   const [selectedAudioUrl, setSelectedAudioUrl] = useState<string | null>(null);
+  // RunningHub fileName for SuperIP GEN (desktop parity)
+  const [superIpAudioRhFileName, setSuperIpAudioRhFileName] = useState<string | null>(null);
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -1053,6 +1065,8 @@ const SuperIpView = () => {
   >(null);
   // 上传框里显示的「选中角色」图片（与结果区解耦）
   const [selectedCharacterImage, setSelectedCharacterImage] = useState<string | null>(null);
+  // RunningHub fileName for SuperIP GEN (desktop parity)
+  const [superIpCharacterRhFileName, setSuperIpCharacterRhFileName] = useState<string | null>(null);
   const characterUploadInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingCharacterImage, setIsUploadingCharacterImage] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<
@@ -1062,6 +1076,252 @@ const SuperIpView = () => {
   const [generatedAudio, setGeneratedAudio] =
     useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState(false);
+
+  const loadSuperIpVideoHistory = async () => {
+    try {
+      const token = localStorage.getItem('access_token');
+      const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || '';
+      const params = new URLSearchParams({
+        source_page: 'SuperIP',
+        content_type: 'video',
+        limit: '30',
+      });
+      const response = await fetch(`${API_BASE}/api/history/list?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (!response.ok) {
+        setSuperIpVideoHistory([]);
+        return;
+      }
+      const data = await response.json();
+      setSuperIpVideoHistory(Array.isArray(data) ? data : []);
+    } catch {
+      setSuperIpVideoHistory([]);
+    }
+  };
+
+  const getAudioDurationSeconds = (urlOrDataUrl: string): Promise<number> => {
+    return new Promise((resolve) => {
+      try {
+        const a = new Audio();
+        a.preload = 'metadata';
+        a.src = urlOrDataUrl;
+        a.onloadedmetadata = () => {
+          const d = Number.isFinite(a.duration) ? a.duration : 0;
+          resolve(Math.max(1, Math.round(d || 0)));
+        };
+        a.onerror = () => resolve(0);
+      } catch {
+        resolve(0);
+      }
+    });
+  };
+
+  const uploadDataUrlToSupabase = async (fileData: string, filename: string, folder: string) => {
+    const res = await api.post('/api/files/upload', {
+      file_data: fileData,
+      filename,
+      folder,
+    });
+    const url = res?.url || res?.file_url || res?.stored_url || res?.supabase_url;
+    if (!url || typeof url !== 'string') {
+      throw new Error('Upload failed');
+    }
+    return url;
+  };
+
+  const RH_UPLOAD_URL = 'https://www.runninghub.cn/task/openapi/upload';
+
+  const uploadFileOrUrlToRunningHub = async (opts: {
+    file?: File;
+    dataUrl?: string;
+    apiKey: string;
+  }): Promise<string> => {
+    // Goal: return RunningHub fileName for /api/superip/start.
+    // Strategy (mirrors Vgot_front behavior):
+    // 1) If we have a real File -> upload directly to RH.
+    // 2) If we only have dataUrl -> decode to Blob and upload to RH.
+    // Note: RH cannot fetch dataUrl by itself.
+    const { file, dataUrl, apiKey } = opts;
+    if (!apiKey) throw new Error('Missing RunningHub apiKey');
+
+    const toFileFromDataUrl = async (du: string) => {
+      const resp = await fetch(du);
+      const blob = await resp.blob();
+      const ext = (() => {
+        const t = (blob.type || '').toLowerCase();
+        if (t.includes('png')) return 'png';
+        if (t.includes('jpeg') || t.includes('jpg')) return 'jpg';
+        if (t.includes('webp')) return 'webp';
+        if (t.includes('wav')) return 'wav';
+        if (t.includes('mpeg') || t.includes('mp3')) return 'mp3';
+        if (t.includes('mp4')) return 'mp4';
+        return 'bin';
+      })();
+      const name = `superip_${Date.now()}.${ext}`;
+      return new File([blob], name, { type: blob.type || 'application/octet-stream' });
+    };
+
+    const f = file || (dataUrl ? await toFileFromDataUrl(dataUrl) : null);
+    if (!f) throw new Error('No file/dataUrl provided');
+
+    const form = new FormData();
+    form.append('apiKey', apiKey);
+    form.append('file', f);
+    form.append('fileType', 'input');
+
+    const rhResp = await fetch(RH_UPLOAD_URL, { method: 'POST', body: form });
+    const rhData = await rhResp.json().catch(() => null);
+    if (!rhResp.ok || !rhData || rhData.code !== 0) {
+      const msg = rhData?.msg || `HTTP ${rhResp.status}`;
+      throw new Error(`RunningHub upload failed: ${msg}`);
+    }
+    const fileName = rhData?.data?.fileName;
+    if (!fileName) throw new Error('RunningHub upload failed: missing fileName');
+    return String(fileName);
+  };
+
+  const startSuperIpGen = async (mode: 'default' | 'custom') => {
+    if (isStartingSuperIpGen || isPollingSuperIpGen) return;
+
+    setSuperIpGenError(null);
+    setSuperIpGenResultUrl(null);
+    setSuperIpGenTaskId('');
+
+    if (!selectedCharacterImage && !characterImageBase64) {
+      alert('请先选择/生成角色图片');
+      return;
+    }
+    if (!selectedAudioUrl && !audioBase64) {
+      alert('请先选择/生成音频');
+      return;
+    }
+
+    setIsStartingSuperIpGen(true);
+    try {
+      // Vgot_front behavior: SuperIP video gen ultimately wants RunningHub fileName.
+      // - Image: prefer existing RunningHub fileName; fallback to uploading current selection (file/dataUrl) to RH.
+      // - Audio: prefer existing RunningHub fileName; fallback to uploading current selection (file/dataUrl) to RH.
+      // We DO NOT hard-require Supabase URL on GEN.
+
+      const RH_IMAGE_API_KEY = (import.meta as any).env?.VITE_RH_IMAGE_API_KEY || (import.meta as any).env?.VITE_RUNNINGHUB_IMAGE_API_KEY || '';
+      const RH_AUDIO_API_KEY = (import.meta as any).env?.VITE_RH_AUDIO_API_KEY || (import.meta as any).env?.VITE_RUNNINGHUB_AUDIO_API_KEY || '';
+
+    // Heuristic: if the stored value already looks like a RH fileName (not an URL), keep it.
+    const looksLikeHttpUrl = (s: string) => /^https?:\/\//i.test(s);
+    const looksLikeDataUrl = (s: string) => /^data:/i.test(s);
+    const looksLikeRhFileName = (s: string) => !!s && !looksLikeHttpUrl(s) && !looksLikeDataUrl(s);
+
+      // 1) Resolve image_file_name
+      let imageFileName: string | null = null;
+      // Prefer RH filename produced during CHAR step
+      if (superIpCharacterRhFileName && looksLikeRhFileName(superIpCharacterRhFileName)) {
+        imageFileName = superIpCharacterRhFileName;
+      } else if (selectedCharacterImage && looksLikeRhFileName(selectedCharacterImage)) {
+        // Back-compat: if something already stored a RH-like value in selectedCharacterImage, accept it.
+        imageFileName = selectedCharacterImage;
+      }
+      if (!imageFileName) {
+        // Desktop parity: if we don't have a RH fileName, desktop falls back to using public URL.
+        // Mobile: prefer Supabase URL when present; else try dataUrl; only then upload to RH.
+        if (selectedCharacterImage && looksLikeHttpUrl(selectedCharacterImage)) {
+          imageFileName = selectedCharacterImage;
+        } else if (characterImageBase64) {
+          imageFileName = characterImageBase64;
+        } else if (selectedCharacterImage && looksLikeDataUrl(selectedCharacterImage)) {
+          imageFileName = selectedCharacterImage;
+        } else {
+          // last resort
+          imageFileName = await uploadFileOrUrlToRunningHub({
+            apiKey: RH_IMAGE_API_KEY,
+            dataUrl: characterImageBase64 || (selectedCharacterImage && looksLikeDataUrl(selectedCharacterImage) ? selectedCharacterImage : undefined),
+          });
+        }
+      }
+
+      // 2) Resolve audio_file_name
+      let audioFileName: string | null = null;
+      // Prefer RH filename produced during VOICE step
+      if (superIpAudioRhFileName && looksLikeRhFileName(superIpAudioRhFileName)) {
+        audioFileName = superIpAudioRhFileName;
+      } else if (selectedAudioUrl && looksLikeRhFileName(selectedAudioUrl)) {
+        // Back-compat: if something already stored a RH-like value in selectedAudioUrl, accept it.
+        audioFileName = selectedAudioUrl;
+      }
+      if (!audioFileName) {
+        // Desktop parity: if we don't have a RH fileName, allow passing through public URL.
+        // Mobile: prefer Supabase URL when present; else try dataUrl; only then upload to RH.
+        if (selectedAudioUrl && looksLikeHttpUrl(selectedAudioUrl)) {
+          audioFileName = selectedAudioUrl;
+        } else if (audioBase64) {
+          audioFileName = audioBase64;
+        } else if (selectedAudioUrl && looksLikeDataUrl(selectedAudioUrl)) {
+          audioFileName = selectedAudioUrl;
+        } else {
+          // last resort
+          audioFileName = await uploadFileOrUrlToRunningHub({
+            apiKey: RH_AUDIO_API_KEY,
+            dataUrl: audioBase64 || (selectedAudioUrl && looksLikeDataUrl(selectedAudioUrl) ? selectedAudioUrl : undefined),
+          });
+        }
+      }
+
+      // 3) Determine duration
+      // Duration is system default on mobile (matches Vgot_front behavior)
+      const durationSec = SUPERIP_DEFAULT_DURATION_SEC;
+
+      const res = await api.post('/api/superip/start', {
+        image_file_name: imageFileName,
+        audio_file_name: audioFileName,
+        prompt: (superIpGenPrompt || '').trim() || null,
+        duration: durationSec,
+      });
+
+      const taskId = String(res?.task_id || res?.taskId || '').trim();
+      if (!taskId) {
+        throw new Error('后端未返回 task_id');
+      }
+      setSuperIpGenTaskId(taskId);
+
+      // 4) Poll outputs
+      setIsPollingSuperIpGen(true);
+      const POLL_MS = 2500;
+      const MAX_TRIES = 240; // ~10 minutes
+      for (let i = 0; i < MAX_TRIES; i++) {
+        const out = await api.get(`/api/superip/outputs/${encodeURIComponent(taskId)}`);
+        if (out?.status === 'success') {
+          const finalUrl = out?.stored_url || out?.file_url;
+          if (finalUrl) {
+            setSuperIpGenResultUrl(String(finalUrl));
+          }
+          // backend already saves history in outputs; refresh mini history
+          loadSuperIpVideoHistory();
+          break;
+        }
+        // running
+        await new Promise((r) => setTimeout(r, POLL_MS));
+      }
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      setSuperIpGenError(msg);
+      console.warn('SuperIP Gen failed:', e);
+      alert(msg);
+    } finally {
+      setIsStartingSuperIpGen(false);
+      setIsPollingSuperIpGen(false);
+    }
+  };
+
+  const clearSuperIpGen = () => {
+    setSuperIpGenPrompt('');
+    setSuperIpGenTaskId('');
+    setSuperIpGenResultUrl(null);
+    setSuperIpGenError(null);
+  };
 
   const steps = [
     { num: 1, name: "Char" },
@@ -1232,6 +1492,9 @@ const SuperIpView = () => {
 
     setIsUploadingCharacterImage(true);
     try {
+      // Clear previous RH fileName; we'll set a fresh one if RH upload succeeds
+      setSuperIpCharacterRhFileName(null);
+
       // Track B: local base64 (data URL) for APIs that need inline upload
       try {
         const b64 = await fileToDataUrl(file);
@@ -1257,6 +1520,19 @@ const SuperIpView = () => {
       }
 
       setSelectedCharacterImage(url);
+
+      // Desktop parity: upload the same image file to RunningHub to get a fileName for GEN.
+      // Note: this is NOT a Supabase URL requirement; it's the primary contract for GEN.
+      try {
+        const RH_IMAGE_API_KEY = (import.meta as any).env?.VITE_RH_IMAGE_API_KEY || (import.meta as any).env?.VITE_RUNNINGHUB_IMAGE_API_KEY || '';
+        if (RH_IMAGE_API_KEY) {
+          const rhName = await uploadFileOrUrlToRunningHub({ apiKey: RH_IMAGE_API_KEY, file });
+          setSuperIpCharacterRhFileName(rhName);
+        }
+      } catch (rhErr) {
+        console.warn('RunningHub image upload failed (non-blocking):', rhErr);
+        // Non-blocking: user can still proceed; GEN will fallback-upload if needed.
+      }
       // Note: per product requirement, local uploads should NOT be stored into the gallery.
       // Gallery is reserved for generated assets / history items.
     } catch (err: any) {
@@ -1270,6 +1546,8 @@ const SuperIpView = () => {
   const handleSelectGalleryImage = (imageUrl: string) => {
     // 选中图库图片：只填充「上传角色」框（不影响结果区）
     setSelectedCharacterImage(imageUrl);
+    // Gallery items don't currently carry RH fileName in our history schema; clear so GEN can fallback-upload if needed.
+    setSuperIpCharacterRhFileName(null);
     setShowGallery(false);
   };
 
@@ -1321,6 +1599,8 @@ const SuperIpView = () => {
     setSelectedAudioUrl(audioUrl);
     // Sync to UI that previously relied on selectedAudio (File) so the "Generated Audio" card updates.
     setSelectedAudio({ name: 'Audio selected', url: audioUrl });
+    // URL/history selections generally don't have RH fileName; clear so GEN can fallback-upload if needed.
+    setSuperIpAudioRhFileName(null);
     // Keep the history modal open so the user can see the selected border highlight.
     // (They can close manually via the close button.)
     // setShowAudioGallery(false);
@@ -1345,6 +1625,7 @@ const SuperIpView = () => {
     setSelectedAudio(null);
     setLocalUploadedAudioName(null);
     setAudioBase64(null);
+    setSuperIpAudioRhFileName(null);
     setSelectedAudioHistoryId(null);
     if (audioUploadInputRef.current) audioUploadInputRef.current.value = "";
   };
@@ -1354,6 +1635,7 @@ const SuperIpView = () => {
     setSelectedAudioUrl(null);
     setLocalUploadedAudioName(null);
     setAudioBase64(null);
+    setSuperIpAudioRhFileName(null);
     if (audioUploadInputRef.current) audioUploadInputRef.current.value = "";
   };
 
@@ -1374,6 +1656,9 @@ const SuperIpView = () => {
 
     setIsUploadingSuperIpAudio(true);
     try {
+      // Clear previous RH fileName; we'll set a fresh one if RH upload succeeds
+      setSuperIpAudioRhFileName(null);
+
       // Track B: base64 (data URL) for APIs that may require inline audio
       try {
         const b64 = await fileToDataUrl(file);
@@ -1390,6 +1675,17 @@ const SuperIpView = () => {
       // Local upload: set the source URL but don't overwrite the Generated Audio card state.
       setSelectedAudioUrl(result.url);
       setLocalUploadedAudioName(file.name);
+
+      // Desktop parity: upload the same audio file to RunningHub to get a fileName for GEN.
+      try {
+        const RH_AUDIO_API_KEY = (import.meta as any).env?.VITE_RH_AUDIO_API_KEY || (import.meta as any).env?.VITE_RUNNINGHUB_AUDIO_API_KEY || '';
+        if (RH_AUDIO_API_KEY) {
+          const rhName = await uploadFileOrUrlToRunningHub({ apiKey: RH_AUDIO_API_KEY, file });
+          setSuperIpAudioRhFileName(rhName);
+        }
+      } catch (rhErr) {
+        console.warn('RunningHub audio upload failed (non-blocking):', rhErr);
+      }
     } catch (err: any) {
       alert(err?.message || "上传失败");
     } finally {
@@ -1400,6 +1696,7 @@ const SuperIpView = () => {
   const clearCharacterSelection = () => {
     setSelectedCharacterImage(null);
     setCharacterImageBase64(null);
+    setSuperIpCharacterRhFileName(null);
   };
 
   const fileToDataUrl = (file: File): Promise<string> =>
@@ -1473,19 +1770,27 @@ const SuperIpView = () => {
               alt="Selected character"
               className="absolute inset-0 w-full h-full object-cover opacity-90"
             />
-            <button
-              type="button"
+            <span
+              role="button"
+              tabIndex={0}
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 clearCharacterSelection();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  clearCharacterSelection();
+                }
               }}
               aria-label="Clear selected character"
               className="absolute top-0 right-0 translate-x-1/4 -translate-y-1/4 z-30 px-1 text-white text-sm leading-none hover:text-slate-200 transition"
               style={{ textShadow: "0 0 6px rgba(0,0,0,0.75)" }}
             >
               ×
-            </button>
+            </span>
           </>
         ) : (
           <>
@@ -2360,7 +2665,17 @@ const SuperIpView = () => {
                 </div>
 
                 {/* Send Icon Button */}
-                <button className="text-cyan-400 hover:text-cyan-300 transition-all p-1">
+                <button
+                  type="button"
+                  onClick={() => startSuperIpGen('default')}
+                  disabled={isStartingSuperIpGen || isPollingSuperIpGen}
+                  className={cn(
+                    "text-cyan-400 hover:text-cyan-300 transition-all p-1",
+                    (isStartingSuperIpGen || isPollingSuperIpGen) && "opacity-50 cursor-not-allowed",
+                  )}
+                  aria-label="Send(default)"
+                  title="Send (default)"
+                >
                   <Send size={24} />
                 </button>
               </div>
@@ -3006,16 +3321,34 @@ const SuperIpView = () => {
                 <textarea
                   className="w-full h-32 bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-[10px] text-white resize-none outline-none focus:border-cyan-500/50 placeholder:text-slate-600 transition-all"
                   placeholder="Describe the character you want..."
+                  value={superIpGenPrompt}
+                  onChange={(e) => setSuperIpGenPrompt(e.target.value)}
                 />
               </div>
 
+              {(isStartingSuperIpGen || isPollingSuperIpGen) && (
+                <div className="text-[10px] text-slate-400">
+                  {isStartingSuperIpGen ? '启动中…' : '生成中…'} {superIpGenTaskId ? `(task: ${superIpGenTaskId})` : ''}
+                </div>
+              )}
+              {superIpGenError && (
+                <div className="text-[10px] text-red-400">
+                  {superIpGenError}
+                </div>
+              )}
+
               <div className="flex gap-2 pt-2">
-                <button className="px-4 py-2 rounded-lg border border-slate-700 text-slate-400 text-[10px] font-bold hover:bg-slate-800 transition-colors">
+                <button
+                  onClick={clearSuperIpGen}
+                  className="px-4 py-2 rounded-lg border border-slate-700 text-slate-400 text-[10px] font-bold hover:bg-slate-800 transition-colors"
+                >
                   Clear
                 </button>
                 <NeonButton
-                  className="flex-1 py-2 text-[10px]"
+                  className="flex-[2] py-2 text-[10px]"
                   variant="primary"
+                  disabled={isStartingSuperIpGen || isPollingSuperIpGen}
+                  onClick={() => startSuperIpGen('custom')}
                 >
                   <Zap size={14} /> Generate
                 </NeonButton>
@@ -3023,24 +3356,26 @@ const SuperIpView = () => {
             </div>
 
             {/* 2. Result Section */}
-            <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 flex flex-col h-64">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
-                  Result
-                </span>
-              </div>
-              <div className="flex-1 rounded-lg bg-black/50 overflow-hidden relative group border border-slate-800">
-                <img
-                  src="https://images.unsplash.com/photo-1686543971025-15aa01b5f7c7?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwb3J0cmFpdCUyMG9mJTIwYXNpYW4lMjBtYW4lMjBjeWJlciUyMGZ1dHVyaXN0fGVufDF8fHx8MTc2NTk2MTM5N3ww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
-                  alt="Generated Character"
-                  className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
-                />
-                <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent">
-                  <p className="text-[8px] text-white/80 line-clamp-1">
-                    A man looking at camera...
-                  </p>
+            <div className="bg-slate-900/40 border border-slate-800 rounded-xl min-h-[200px] flex flex-col items-center justify-center p-6 text-center space-y-3 relative overflow-hidden">
+              {superIpGenResultUrl ? (
+                <div className="w-full h-full">
+                  <video
+                    src={superIpGenResultUrl}
+                    controls
+                    playsInline
+                    className="w-full h-full rounded-lg object-cover border border-slate-800 bg-black/50"
+                  />
                 </div>
-              </div>
+              ) : (
+                <>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">
+                    Result
+                  </span>
+                  <p className="text-[10px] text-slate-500 font-medium">
+                    Generated video will appear here
+                  </p>
+                </>
+              )}
             </div>
 
             {/* 3. History (Mini) */}
@@ -3049,17 +3384,24 @@ const SuperIpView = () => {
                 History
               </span>
               <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-                {[1, 2, 3].map((i) => (
-                  <div
-                    key={i}
-                    className="w-24 h-16 rounded-lg bg-slate-800 shrink-0 border border-slate-700 overflow-hidden relative group"
-                  >
-                    <img
-                      src={`https://images.unsplash.com/photo-${i === 1 ? "1506794778202-cad84cf45f1d" : i === 2 ? "1500648767791-00dcc994a43e" : "1534528741775-53994a69daeb"}?w=200&h=200&fit=crop`}
-                      className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity"
-                    />
-                  </div>
-                ))}
+                {(superIpVideoHistory?.length ? superIpVideoHistory : []).map((item: any, idx: number) => {
+                  const thumb = item?.file_url || item?.stored_url || item?.file_data || item?.url;
+                  return (
+                    <button
+                      key={item?.id || idx}
+                      type="button"
+                      onClick={() => {
+                        if (thumb) setSuperIpGenResultUrl(String(thumb));
+                      }}
+                      className="w-24 h-16 rounded-lg bg-slate-800 shrink-0 border border-slate-700 overflow-hidden relative group"
+                      title="打开"
+                    >
+                      <div className="w-full h-full flex items-center justify-center text-[9px] text-slate-400">
+                        video
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </motion.div>
