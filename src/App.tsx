@@ -294,6 +294,7 @@ const WorkspaceView = ({
           <ChevronRight className="text-slate-600" size={16} />
         </button>
       </div>
+
     </div>
   );
 };
@@ -382,6 +383,7 @@ const TaskCard = ({ task, setTasks }: { task: Task, setTasks: React.Dispatch<Rea
           {task.prompt || "No prompt provided"}
         </p>
       </div>
+
     </div>
   );
 };
@@ -3911,6 +3913,218 @@ const HistoryView = () => {
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
+  // Expanded media player (full-screen modal)
+  const [expandedVideo, setExpandedVideo] = useState<{
+    id: string;
+    url: string;
+  } | null>(null);
+
+  // Audio player state (custom UI)
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const [pausedId, setPausedId] = useState<string | null>(null);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [audioDurationsById, setAudioDurationsById] = useState<Record<string, number>>({});
+
+  const getRecordUrl = (record: any): string => {
+    const candidates = [
+      record?.file_url,
+      record?.stored_url,
+      record?.file_data,
+      record?.url,
+      record?.video_url,
+      record?.audio_url,
+      record?.image_url,
+    ];
+    const picked = candidates.find((v) => typeof v === "string" && v.trim().length > 0);
+    return (picked || "").toString();
+  };
+
+  const fmtTime = (sec: number) => {
+    const s = Math.max(0, Math.floor(sec || 0));
+    const mm = String(Math.floor(s / 60)).padStart(2, "0");
+    const ss = String(s % 60).padStart(2, "0");
+    return `${mm}:${ss}`;
+  };
+
+  const stopAudio = () => {
+    try {
+      if (audioElRef.current) {
+        audioElRef.current.pause();
+        audioElRef.current.currentTime = 0;
+      }
+    } catch {
+      // ignore
+    }
+    setPlayingId(null);
+    setPausedId(null);
+    setAudioCurrentTime(0);
+  };
+
+  const toggleAudio = (id: string, url: string) => {
+    // Single shared <audio> element so we can build a custom player without styling native controls.
+    try {
+      if (!audioElRef.current) audioElRef.current = new Audio();
+      const a = audioElRef.current;
+      a.preload = "metadata";
+      a.crossOrigin = "anonymous";
+
+      // If this track is currently playing (and not already paused), pause it.
+      if (playingId === id && pausedId !== id) {
+        a.pause();
+        // Keep cursor/time where it is; just mark this card as paused.
+        setPausedId(id);
+        return;
+      }
+
+      // Resume if this track is paused
+      if (pausedId === id) {
+        // Resume should NOT touch `src`, otherwise it can restart the audio from 0.
+        // `src` is already set when we first started this track.
+        a.play()
+          .then(() => {
+            setPlayingId(id);
+            setPausedId(null);
+          })
+          .catch(() => {
+            // ignore
+          });
+        return;
+      }
+
+      // switch track
+      if (a.src !== url) {
+        a.src = url;
+        // reset UI cursor for the new track
+        setAudioCurrentTime(0);
+        setAudioDuration(0);
+        setPausedId(null);
+      }
+
+      a.play().then(() => {
+        setPlayingId(id);
+        setPausedId(null);
+      }).catch(() => {
+        // autoplay restrictions or decode errors
+        setPlayingId(null);
+        setPausedId(null);
+      });
+    } catch {
+      setPlayingId(null);
+      setPausedId(null);
+    }
+  };
+
+  // Keep audio progress in sync
+  // NOTE: the Audio element is created lazily (inside toggleAudio), so we bind listeners on-demand.
+  useEffect(() => {
+    if (!audioElRef.current) return;
+    const a = audioElRef.current;
+
+    const onTime = () => setAudioCurrentTime(a.currentTime || 0);
+    const onMeta = () => {
+      const d = Number.isFinite(a.duration) ? a.duration : 0;
+      setAudioDuration(d);
+      if (playingId) setAudioDurationsById((prev) => ({ ...prev, [playingId]: d }));
+    };
+    const onEnded = () => {
+      setPlayingId(null);
+      setPausedId(null);
+      setAudioCurrentTime(0);
+    };
+    const onError = () => {
+      setPlayingId(null);
+      setPausedId(null);
+    };
+
+    const onPause = () => {
+      // When pausing (not ending), keep the knob where it stopped.
+      if (playingId) setPausedId(playingId);
+    };
+
+    const onPlay = () => {
+      // When playing, clear paused state
+      setPausedId(null);
+    };
+
+    a.addEventListener("timeupdate", onTime);
+    a.addEventListener("loadedmetadata", onMeta);
+    a.addEventListener("durationchange", onMeta);
+    a.addEventListener("ended", onEnded);
+    a.addEventListener("error", onError);
+  a.addEventListener("pause", onPause);
+  a.addEventListener("play", onPlay);
+    return () => {
+      a.removeEventListener("timeupdate", onTime);
+      a.removeEventListener("loadedmetadata", onMeta);
+      a.removeEventListener("durationchange", onMeta);
+      a.removeEventListener("ended", onEnded);
+      a.removeEventListener("error", onError);
+      a.removeEventListener("pause", onPause);
+      a.removeEventListener("play", onPlay);
+    };
+  }, [playingId]);
+
+  // Preload audio durations so each card shows correct total time even when not playing
+  useEffect(() => {
+    const audios = historyRecords.filter((r) => r.content_type === "audio");
+    if (audios.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      for (const r of audios) {
+        const id = String(r.id);
+        if (audioDurationsById[id]) continue;
+        const url = getRecordUrl(r);
+        if (!url) continue;
+
+        try {
+          const a = new Audio();
+          a.preload = "metadata";
+          a.src = url;
+          await new Promise<void>((resolve) => {
+            const done = () => resolve();
+            a.onloadedmetadata = done;
+            a.onerror = done;
+          });
+          const d = Number.isFinite(a.duration) ? a.duration : 0;
+          if (!cancelled && d > 0) {
+            setAudioDurationsById((prev) => ({ ...prev, [id]: d }));
+          }
+        } catch {
+          // ignore
+        }
+
+        // avoid requesting too many at once on mobile
+        await new Promise((r) => setTimeout(r, 80));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyRecords]);
+
+  const audioSeekBarStyle = (progressPct: number): React.CSSProperties => ({
+    WebkitAppearance: "none",
+    appearance: "none",
+    height: 4,
+    borderRadius: 999,
+    background: `linear-gradient(90deg, rgba(34,211,238,0.95) 0%, rgba(217,70,239,0.85) ${Math.max(
+      0,
+      Math.min(100, progressPct),
+    )}%, rgba(148,163,184,0.25) ${Math.max(0, Math.min(100, progressPct))}%, rgba(148,163,184,0.25) 100%)`,
+    outline: "none",
+  });
+
+  // If you expand a video, stop audio to avoid messy overlapping media.
+  useEffect(() => {
+    if (expandedVideo) stopAudio();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedVideo]);
+
   const fetchHistory = async (filter: "all" | HistoryContentType) => {
     setLoadingHistory(true);
     try {
@@ -4036,6 +4250,9 @@ const HistoryView = () => {
           historyRecords.map((record) => {
             const type = record.content_type;
             const dateText = formatHistoryDate(record.created_at);
+            const mediaUrl = getRecordUrl(record);
+            const idStr = String(record.id);
+            const isExpanded = expandedVideo?.id === idStr;
             const badgeClass =
               record.source_page === "HyperSell"
                 ? "border-purple-500/30 text-purple-400 bg-purple-500/10"
@@ -4047,79 +4264,168 @@ const HistoryView = () => {
                 key={String(record.id)}
                 className="p-0 flex flex-col group border-slate-800 bg-slate-900/40"
               >
-                <div className="flex p-4 gap-4 items-start">
-                  <div className="w-24 h-24 bg-black rounded-lg shrink-0 overflow-hidden relative">
-                    {type === "image" && record.file_url ? (
-                      <img
-                        src={record.file_url}
-                        alt={record.prompt || "History image"}
-                        className="w-full h-full object-cover opacity-90"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
-                        {type === "video" ? (
-                          <Video size={20} className="text-slate-700" />
-                        ) : type === "audio" ? (
-                          <Volume2 size={20} className="text-slate-700" />
-                        ) : (
-                          <ImageIcon size={20} className="text-slate-700" />
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-start mb-1">
+                <div className="px-4 pt-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
                       <span
                         className={cn(
-                          "text-[10px] font-bold px-2 py-0.5 rounded border uppercase",
+                          "text-[9px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider",
                           badgeClass,
                         )}
                       >
                         {badgeText}
                       </span>
-                      {dateText && (
-                        <span className="text-[10px] text-slate-500 flex items-center gap-1">
-                          <Clock size={10} /> {dateText}
-                        </span>
-                      )}
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider bg-white/5 text-white/70 border-white/10">
+                        {type}
+                      </span>
                     </div>
 
-                    {record.prompt ? (
-                      <p className="text-[10px] text-slate-400 line-clamp-2">
-                        {record.prompt}
-                      </p>
-                    ) : (
-                      <p className="text-[10px] text-slate-600">No prompt</p>
+                    {dateText && (
+                      <div className="shrink-0 text-[10px] text-slate-400 flex items-center gap-1">
+                        <Clock size={12} /> {dateText}
+                      </div>
                     )}
+                  </div>
+                </div>
 
-                    {type === "audio" && record.file_url && (
-                      <div className="mt-2">
-                        <audio
-                          controls
-                          src={record.file_url}
-                          controlsList="nodownload noplaybackrate"
-                          className="w-full"
-                          onContextMenu={(e) => e.preventDefault()}
+                <div className="flex p-4 gap-4 items-start">
+                  {type !== "audio" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!mediaUrl) return;
+                        if (type === "video") {
+                          setExpandedVideo({ id: idStr, url: mediaUrl });
+                          return;
+                        }
+                      }}
+                      className={cn(
+                        "w-24 h-24 shrink-0 rounded-xl overflow-hidden relative border",
+                        mediaUrl ? "border-slate-700 bg-black" : "border-slate-800 bg-slate-950/80",
+                      )}
+                      aria-label="Open media"
+                    >
+                      {type === "image" && mediaUrl ? (
+                        <img
+                          src={mediaUrl}
+                          alt={record.prompt || "History image"}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
                         />
+                      ) : type === "video" && mediaUrl ? (
+                        <>
+                          <video
+                            src={mediaUrl}
+                            preload="metadata"
+                            muted
+                            playsInline
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
+                          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                            <div className="w-9 h-9 rounded-full bg-white/10 border border-white/20 backdrop-blur flex items-center justify-center shadow-[0_0_16px_rgba(0,0,0,0.5)]">
+                              <Play size={16} className="text-white/90" />
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
+                          {type === "video" ? (
+                            <Play size={16} className="text-slate-500" />
+                          ) : (
+                            <ImageIcon size={16} className="text-slate-500" />
+                          )}
+                        </div>
+                      )}
+                    </button>
+                  )}
+
+                  <div className={cn("flex-1 min-w-0", type === "audio" && "pl-0")}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        {record.prompt ? (
+                          <div className="text-[11px] text-white/90 font-semibold line-clamp-2">
+                            {record.prompt}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] leading-snug text-slate-500/90 font-normal">No prompt</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {type === "audio" && mediaUrl && (
+                      <div className="mt-3">
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => toggleAudio(idStr, mediaUrl)}
+                            className={cn(
+                              "w-10 h-10 rounded-xl flex items-center justify-center border transition-colors",
+                              playingId === idStr || pausedId === idStr
+                                ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-200"
+                                : "border-white/10 bg-white/5 text-white/80 hover:bg-white/10",
+                            )}
+                            aria-label={playingId === idStr && pausedId !== idStr ? "Pause audio" : "Play audio"}
+                          >
+                            {playingId === idStr && pausedId !== idStr ? <Pause size={16} /> : <Play size={16} />}
+                          </button>
+                          <div className="flex-1">
+                            {(() => {
+                              const durationForThis =
+                                playingId === idStr
+                                  ? audioDuration
+                                  : (audioDurationsById[idStr] || 0);
+                              const isThisPlaying = playingId === idStr;
+                              const isThisPaused = pausedId === idStr;
+                              const currentForThis = isThisPlaying || isThisPaused ? audioCurrentTime : 0;
+                              const remainingForThis = Math.max(
+                                0,
+                                (durationForThis || 0) - (currentForThis || 0),
+                              );
+                              const pct = durationForThis > 0 ? (currentForThis / durationForThis) * 100 : 0;
+                              return (
+                                <>
+                            <input
+                              type="range"
+                              className="w-full cursor-pointer vgot-audio-seek"
+                              min={0}
+                              max={durationForThis || 0}
+                              step={0.01}
+                              value={currentForThis}
+                              style={audioSeekBarStyle(pct)}
+                              onChange={(e) => {
+                                const t = Number(e.target.value || 0);
+                                setAudioCurrentTime(t);
+                                if (audioElRef.current && (playingId === idStr || pausedId === idStr)) {
+                                  audioElRef.current.currentTime = t;
+                                }
+                              }}
+                            />
+                            <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1">
+                              <span>{isThisPlaying ? "00:00" : fmtTime(currentForThis)}</span>
+                              <span>
+                                {isThisPlaying ? fmtTime(remainingForThis) : fmtTime(durationForThis)}
+                              </span>
+                            </div>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
                 </div>
 
                 <div className="border-t border-white/5 p-3 flex justify-between items-center bg-white/[0.02]">
-                  {/* id is still real data, but keep it subtle */}
-                  <span className="text-[10px] text-slate-600 font-mono">
-                    {record.id ? `ID: ${record.id}` : ""}
-                  </span>
+                  <span />
                   <button
                     type="button"
-                    disabled={!record.file_url}
-                    onClick={() => record.file_url && downloadFromUrl(record.file_url, record)}
+                    disabled={!mediaUrl}
+                    onClick={() => mediaUrl && downloadFromUrl(mediaUrl, record)}
                     className={cn(
                       "text-[10px] font-medium transition-colors",
-                      record.file_url
+                      mediaUrl
                         ? "text-white hover:text-cyan-400"
                         : "text-slate-600 cursor-not-allowed",
                     )}
@@ -4132,12 +4438,61 @@ const HistoryView = () => {
           })
         )}
       </div>
+
+      {expandedVideo &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={() => setExpandedVideo(null)}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="w-full max-w-[720px] rounded-2xl overflow-hidden border border-white/10 bg-slate-950 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
+                <div className="text-[10px] font-bold tracking-wider uppercase text-slate-300">
+                  Video
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setExpandedVideo(null)}
+                  className="w-9 h-9 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-slate-200 flex items-center justify-center"
+                  aria-label="Close"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="bg-black">
+                <video
+                  src={expandedVideo.url}
+                  controls
+                  autoPlay
+                  preload="metadata"
+                  playsInline
+                  className="w-full max-h-[70vh] object-contain"
+                  controlsList="nodownload noplaybackrate"
+                />
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };
 
 // 5. Scripts Page
 const ScriptsView = () => {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const rewriteFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+
   const [activeMode, setActiveMode] = useState<
     "extract" | "scene" | "rewrite"
   >("extract");
@@ -4148,14 +4503,7 @@ const ScriptsView = () => {
   const [rewriteText, setRewriteText] = useState("");
   const [rewriteImageFile, setRewriteImageFile] = useState<File | null>(null);
   const [rewriteImageUrl, setRewriteImageUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const rewriteFileInputRef = useRef<HTMLInputElement>(null);
-
-  // Clean up object URLs
   useEffect(() => {
     return () => {
       if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
@@ -4166,21 +4514,18 @@ const ScriptsView = () => {
   const modes = [
     {
       id: "extract",
-      label: "Extract Audio Copy",
-      icon: FileText,
-      desc: "Extract the audio transcript from the video",
+      label: "Extract",
+      icon: Zap,
     },
     {
       id: "scene",
-      label: "Reverse Prompt",
+      label: "Scene",
       icon: Film,
-      desc: "Analyze the video and infer prompts in one click",
     },
     {
       id: "rewrite",
-      label: "Viral Copy",
+      label: "Rewrite",
       icon: PenTool,
-      desc: "Generate viral copy from product info and images in one click",
     },
   ];
 
@@ -4190,7 +4535,6 @@ const ScriptsView = () => {
       if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
       setUploadedFile(file);
       setLocalPreviewUrl(URL.createObjectURL(file));
-      setVideoUrl("");
     }
   };
 

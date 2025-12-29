@@ -148,6 +148,56 @@
   }
 }
 
+/* --- VGOT: History audio seek bar styling --- */
+.vgot-audio-seek{
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px; /* gives the thumb a box to align within */
+  background: transparent;
+}
+
+.vgot-audio-seek::-webkit-slider-thumb{
+  -webkit-appearance: none;
+  appearance: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: rgba(217, 70, 239, 0.95);
+  border: 1px solid rgba(217, 70, 239, 0.95);
+  /* Center thumb on 4px track: (thumb - track)/2 = (8-4)/2 = 2px */
+  margin-top: -2px;
+  box-shadow:
+    0 0 0 2px rgba(217, 70, 239, 0.18),
+    0 0 6px rgba(217, 70, 239, 0.18);
+}
+
+.vgot-audio-seek::-webkit-slider-runnable-track{
+  height: 4px;
+  border-radius: 9999px;
+}
+
+.vgot-audio-seek::-moz-range-thumb{
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: rgba(217, 70, 239, 0.95);
+  border: 1px solid rgba(217, 70, 239, 0.95);
+  box-shadow:
+    0 0 0 2px rgba(217, 70, 239, 0.18),
+    0 0 6px rgba(217, 70, 239, 0.18);
+}
+
+.vgot-audio-seek::-moz-range-track{
+  height: 4px;
+  border-radius: 9999px;
+  background: transparent;
+}
+
+/* Remove Firefox's default focus outline padding quirks */
+.vgot-audio-seek::-moz-focus-outer{
+  border: 0;
+}
+
 @layer base {
   *, :after, :before, ::backdrop {
     box-sizing: border-box;
