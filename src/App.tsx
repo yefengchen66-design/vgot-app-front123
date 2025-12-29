@@ -308,6 +308,7 @@ interface Task {
   progress: number;
   resultUrl?: string;
   supabaseUrl?: string;
+  historySaved?: boolean;
   error?: string;
   createdAt: number;
   aspectRatio?: string;
@@ -379,9 +380,11 @@ const TaskCard = ({ task, setTasks }: { task: Task, setTasks: React.Dispatch<Rea
             {new Date(task.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
         </div>
-        <p className="text-xs text-slate-300 line-clamp-2 font-medium">
-          {task.prompt || "No prompt provided"}
-        </p>
+        {task.type !== 'enhance' && (
+          <p className="text-xs text-slate-300 line-clamp-2 font-medium">
+            {task.prompt || "No prompt provided"}
+          </p>
+        )}
       </div>
 
     </div>
@@ -401,16 +404,51 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
     }
   });
 
-  const [prompt, setPrompt] = useState("");
+  // Keep prompts isolated by mode so Enhance doesn't accidentally reuse Text/Image prompt.
+  const [promptByTab, setPromptByTab] = useState<Record<"text" | "image" | "enhance", string>>({
+    text: "",
+    image: "",
+    enhance: "", // enhance has no prompt UI
+  });
+  const prompt = promptByTab[activeTab];
+  const setPrompt = (val: string) => setPromptByTab(prev => ({ ...prev, [activeTab]: val }));
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [duration, setDuration] = useState("10");
   const [quality, setQuality] = useState("small");
-  const [loading, setLoading] = useState(false);
-  const [polling, setPolling] = useState(false);
+  // NOTE: loading/polling should be per-tab; otherwise switching tabs makes other tabs look "generating"
+  const [loadingByTab, setLoadingByTab] = useState<Record<"text" | "image" | "enhance", boolean>>({
+    text: false,
+    image: false,
+    enhance: false,
+  });
+  const [pollingByTab, setPollingByTab] = useState<Record<"text" | "image" | "enhance", boolean>>({
+    text: false,
+    image: false,
+    enhance: false,
+  });
   const [taskId, setTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timersRef = useRef(new Map<string, { intervalId: any; startAt: number }>());
+
+  // Daily midnight cleanup for "Latest Result" cards
+  useEffect(() => {
+    let dispose: (() => void) | null = null;
+    // Lazy import to avoid impacting initial bundle for non-HyperSell users
+    import('./lib/dailyCleanup').then(({ setupDailyMidnightCleanup }) => {
+      const h = setupDailyMidnightCleanup({
+        storageKey: 'vgot:hypersell:tasks',
+        onClear: () => setTasks([]),
+      });
+      dispose = h.dispose;
+    }).catch(() => {
+      // ignore
+    });
+
+    return () => {
+      try { dispose?.(); } catch { /* ignore */ }
+    };
+  }, []);
 
   const checkVideoDuration = (file: File): Promise<number | null> => {
     return new Promise((resolve) => {
@@ -485,7 +523,7 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
   const startPolling = async (apiId: string, type: "text" | "image" | "enhance", localId: string, metadata: { prompt: string; params: any; aspectRatio: string; duration: string }) => {
     if (timersRef.current.has(localId)) return;
 
-    setPolling(true);
+    setPollingByTab(prev => ({ ...prev, [type]: true }));
     const pollUrl = type === "enhance" ? `/api/enhance/outputs/${apiId}` : (type === "text" ? `/api/sora/poll/${apiId}` : `/api/sora/watermark-free/${apiId}`);
     const startAt = Date.now();
     const MAX_POLL_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -535,29 +573,40 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
 
           // Persist history (only for text/image, backend handles enhance)
           if (type !== "enhance") {
-            try {
-              api.post("/api/history/save", {
-                content_type: "video",
-                content_subtype: type === "text" ? "text_to_video" : "image_to_video",
-                source_page: type === "text" ? "VideoGeneration" : "HyperSell",
-                file_data: finalUrl,
-                prompt: metadata.prompt || "",
-                generation_params: metadata.params || {},
-                api_endpoint: type === "text" ? "/api/sora/text-to-video" : "/api/sora/watermark-free",
-                api_response_data: data,
-                duration: Number(metadata.duration) || null,
-                dimensions: metadata.aspectRatio || null,
-              }).then(saved => {
-                if (saved?.file_url) {
-                  setTasks(prev => prev.map(t => t.id === localId ? {
-                    ...t,
-                    supabaseUrl: saved.file_url,
-                    resultUrl: saved.file_url
-                  } : t));
-                }
-              }).catch(e => console.warn("Failed to save to history", e));
-            } catch (e) {
-              console.warn("Failed to save to history", e);
+            // Ensure idempotency: polling can hit success multiple times (e.g., if finalUrl is already present)
+            // so we guard to avoid creating duplicate history records.
+            let shouldSave = false;
+            setTasks(prev => {
+              const t = prev.find(x => x.id === localId);
+              if (t && !t.historySaved) shouldSave = true;
+              return prev.map(x => x.id === localId ? { ...x, historySaved: true } : x);
+            });
+
+            if (shouldSave) {
+              try {
+                api.post("/api/history/save", {
+                  content_type: "video",
+                  content_subtype: type === "text" ? "text_to_video" : "image_to_video",
+                  source_page: "HyperSell",
+                  file_data: finalUrl,
+                  prompt: metadata.prompt || "",
+                  generation_params: metadata.params || {},
+                  api_endpoint: type === "text" ? "/api/sora/text-to-video" : "/api/sora/watermark-free",
+                  api_response_data: data,
+                  duration: Number(metadata.duration) || null,
+                  dimensions: metadata.aspectRatio || null,
+                }).then(saved => {
+                  if (saved?.file_url) {
+                    setTasks(prev => prev.map(t => t.id === localId ? {
+                      ...t,
+                      supabaseUrl: saved.file_url,
+                      resultUrl: saved.file_url
+                    } : t));
+                  }
+                }).catch(e => console.warn("Failed to save to history", e));
+              } catch (e) {
+                console.warn("Failed to save to history", e);
+              }
             }
           }
 
@@ -611,10 +660,9 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
         clearInterval(timer.intervalId);
         timersRef.current.delete(localId);
       }
-      if (timersRef.current.size === 0) {
-        setPolling(false);
-        setLoading(false);
-      }
+      // only stop spinner for the task's own tab when its polling is done
+      setPollingByTab(prev => ({ ...prev, [type]: false }));
+      setLoadingByTab(prev => ({ ...prev, [type]: false }));
     };
 
     const intervalId = setInterval(poll, 5000);
@@ -637,7 +685,7 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
       return;
     }
 
-    setLoading(true);
+  setLoadingByTab(prev => ({ ...prev, [activeTab]: true }));
     setError(null);
 
     const localId = `${activeTab}-${Date.now()}`;
@@ -653,10 +701,12 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
       size: quality
     } : {});
 
+    const taskPrompt = activeTab === 'enhance' ? '' : prompt;
+
     const newTask: Task = {
       id: localId,
       type: activeTab,
-      prompt: prompt,
+      prompt: taskPrompt,
       status: "running",
       progress: 0,
       createdAt: Date.now(),
@@ -690,7 +740,7 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
         const durationSec = await checkVideoDuration(uploadedFile!);
         if (durationSec === null || durationSec > 15.25) {
           alert("Video duration must be 15 seconds or less");
-          setLoading(false);
+          setLoadingByTab(prev => ({ ...prev, [activeTab]: false }));
           setTasks(prev => prev.filter(t => t.id !== localId));
           return;
         }
@@ -725,7 +775,7 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
       const errorMsg = err.message || "An error occurred";
       setError(errorMsg);
       setTasks(prev => prev.map(t => t.id === localId ? { ...t, status: "failed", error: errorMsg } : t));
-      setLoading(false);
+      setLoadingByTab(prev => ({ ...prev, [activeTab]: false }));
     }
   };
 
@@ -898,12 +948,12 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
       <div className="pt-4">
         <NeonButton
           onClick={handleGenerate}
-          disabled={loading || polling}
+          disabled={loadingByTab[activeTab] || pollingByTab[activeTab]}
         >
-          {loading || polling ? (
+          {loadingByTab[activeTab] || pollingByTab[activeTab] ? (
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              {polling ? "Generating..." : "Uploading..."}
+              {pollingByTab[activeTab] ? "Generating..." : "Uploading..."}
             </div>
           ) : (
             <>
