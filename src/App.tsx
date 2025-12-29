@@ -12,6 +12,7 @@ const StableImage = React.memo(
 import { api } from "./lib/api";
 import {
   Check,
+  ChevronDown,
   Trash2,
   LayoutGrid,
   History,
@@ -46,6 +47,7 @@ import {
   PenTool,
   Send,
   RefreshCw,
+  Lock,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { createPortal } from "react-dom";
@@ -5048,97 +5050,409 @@ const PartnerProgramView = ({
   onBack,
 }: {
   onBack: () => void;
-}) => (
-  <div className="flex flex-col h-full pb-24 animate-in fade-in slide-in-from-right duration-300">
-    <div className="flex items-center gap-3 mb-6">
-      <button
-        onClick={onBack}
-        className="p-2 hover:bg-slate-800 rounded-full transition-colors"
-      >
-        <ChevronLeft size={24} className="text-slate-400" />
-      </button>
-      <h1 className="text-xl font-bold text-white">
-        Partner Program
-      </h1>
+}) => {
+  const [isApplyOpen, setIsApplyOpen] = useState(false);
+  const [isContactOpen, setIsContactOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [copiedField, setCopiedField] = useState<null | "general" | "partner">(null);
+  const [form, setForm] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    socialPlatform: "",
+    socialMedia: "",
+  });
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+
+  // Desktop (Vgot_front) writes applications directly into Supabase table `partner_applications`.
+  // Mobile mirrors that behavior to avoid needing any backend change.
+  const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || (import.meta as any).env?.VITE_PUBLIC_SUPABASE_URL || "";
+  const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || (import.meta as any).env?.VITE_PUBLIC_SUPABASE_ANON_KEY || "";
+
+  const handleCopy = async (text: string, field: "general" | "partner") => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(null), 1500);
+    } catch {
+      // Clipboard may be blocked on some browsers/contexts.
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submitting) return;
+
+    setSubmitError(null);
+    setSubmitSuccess(null);
+
+    const missing =
+      !form.firstName.trim() ||
+      !form.lastName.trim() ||
+      !form.email.trim() ||
+      !form.phone.trim() ||
+      !form.socialPlatform.trim() ||
+      !form.socialMedia.trim();
+    if (missing) {
+      setSubmitError("Please fill in all fields.");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+
+      if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+        setSubmitError("Supabase is not configured (missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).");
+        return;
+      }
+
+      let createClient: any;
+      try {
+        // Dynamic import so the app still builds even if supabase-js isn't installed.
+        // @ts-ignore
+        const mod: any = await import("@supabase/supabase-js");
+        createClient = mod?.createClient;
+      } catch {
+        setSubmitError("Missing dependency: @supabase/supabase-js. Please add it to Vgot-app-font-main.");
+        return;
+      }
+
+      if (!createClient) {
+        setSubmitError("Supabase client is unavailable.");
+        return;
+      }
+
+      const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      const email = form.email.trim().toLowerCase();
+      const platform = form.socialPlatform.trim();
+
+      // Dedup check (mirror desktop behavior).
+      const { data: existing, error: existsErr } = await supabase
+        .from("partner_applications")
+        .select("id")
+        .eq("email", email)
+        .eq("social_platform", platform)
+        .limit(1);
+
+      if (existsErr) {
+        throw existsErr;
+      }
+      if (existing && existing.length) {
+        setSubmitError("You already applied with this platform.");
+        return;
+      }
+
+      const insertPayload = {
+        first_name: form.firstName.trim(),
+        last_name: form.lastName.trim(),
+        email,
+        phone: form.phone.trim(),
+        social_platform: platform,
+        social_account: form.socialMedia.trim(),
+        status: "pending",
+      };
+
+      const { error: insertError } = await supabase
+        .from("partner_applications")
+        .insert(insertPayload);
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      setSubmitSuccess("Application submitted successfully!");
+      setForm({
+        firstName: "",
+        lastName: "",
+        email: "",
+        phone: "",
+        socialPlatform: "",
+        socialMedia: "",
+      });
+      setIsApplyOpen(false);
+    } catch (err: any) {
+      const msg = err?.message || "Submission failed, please retry.";
+      setSubmitError(String(msg));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full pb-24 animate-in fade-in slide-in-from-right duration-300">
+      <div className="flex items-center gap-3 mb-6">
+        <button
+          onClick={onBack}
+          className="p-2 hover:bg-slate-800 rounded-full transition-colors"
+        >
+          <ChevronLeft size={24} className="text-slate-400" />
+        </button>
+        <h1 className="text-xl font-bold text-white">Partner Program</h1>
+      </div>
+
+      <div className="flex-1 overflow-y-auto space-y-6 px-1">
+        <div className="text-center space-y-3 mb-8">
+          <div className="w-16 h-16 bg-slate-800 rounded-2xl mx-auto flex items-center justify-center text-cyan-400 mb-4 shadow-[0_0_20px_rgba(34,211,238,0.2)]">
+            <Users size={32} />
+          </div>
+          <h2 className="text-2xl font-black text-white leading-tight">
+            Join the VGOT Partner Program
+          </h2>
+          <p className="text-slate-400 text-sm leading-relaxed px-4">
+            Share VGOT with your community. Every paid subscription from your link earns you a{" "}
+            <span className="text-cyan-400 font-bold">30% recurring commission</span>.
+          </p>
+        </div>
+
+        <div className="grid gap-4">
+          <div className="p-5 bg-slate-900/50 border border-slate-800 rounded-xl space-y-3">
+            <div className="w-10 h-10 bg-purple-500/10 rounded-lg flex items-center justify-center text-purple-400">
+              <TrendingUp size={20} />
+            </div>
+            <h3 className="font-bold text-white">High Recurring Commission</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Not just the first sale. Earn 30% every month as long as your user keeps their subscription.
+            </p>
+          </div>
+          <div className="p-5 bg-slate-900/50 border border-slate-800 rounded-xl space-y-3">
+            <div className="w-10 h-10 bg-blue-500/10 rounded-lg flex items-center justify-center text-blue-400">
+              <CreditCard size={20} />
+            </div>
+            <h3 className="font-bold text-white">Stripe Automated Payouts</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              We handle Stripe Connect and send commissions directly to your bank account.
+            </p>
+          </div>
+          <div className="p-5 bg-slate-900/50 border border-slate-800 rounded-xl space-y-3">
+            <div className="w-10 h-10 bg-pink-500/10 rounded-lg flex items-center justify-center text-pink-400">
+              <Download size={20} />
+            </div>
+            <h3 className="font-bold text-white">Exclusive Marketing Resources</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Get official demo videos, banners and copy templates to boost your promotion.
+            </p>
+          </div>
+        </div>
+
+        <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl text-center space-y-4 mt-8">
+          <h3 className="font-bold text-white">Ready to start earning?</h3>
+          <p className="text-xs text-slate-400">
+            Tell us briefly about your audience. After you apply, our team reviews within 24 hours.
+          </p>
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={() => {
+                setSubmitError(null);
+                setSubmitSuccess(null);
+                setIsApplyOpen(true);
+              }}
+              className="w-full py-3 bg-white text-slate-950 font-bold rounded-lg hover:bg-slate-200 transition-colors"
+            >
+              Apply as Partner
+            </button>
+            <button
+              onClick={() => setIsContactOpen(true)}
+              className="w-full py-3 bg-transparent border border-slate-700 text-white font-bold rounded-lg hover:bg-slate-800 transition-colors"
+            >
+              Contact Support
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Apply Modal */}
+      {isApplyOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <style>{`
+            /* Partner modal select dropdown theming (cross-browser best effort) */
+            .partner-select { color-scheme: dark; }
+            .partner-select option { background-color: #0b1220; color: #eef2ff; }
+            .partner-select option:checked { background-color: #4f46e5; color: #ffffff; }
+          `}</style>
+          <div
+            className="absolute inset-0 bg-black/75 backdrop-blur-sm"
+            onClick={() => !submitting && setIsApplyOpen(false)}
+          />
+          <div className="relative w-full max-w-md rounded-[28px] border border-white/10 bg-slate-900/80 shadow-[0_25px_80px_rgba(0,0,0,0.65)] overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200">
+            <div className="pointer-events-none absolute inset-0 rounded-[28px] bg-gradient-to-br from-indigo-500/10 via-transparent to-pink-500/10" />
+            <div className="pointer-events-none absolute -top-20 -left-20 h-48 w-48 rounded-full bg-indigo-500/15 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-24 -right-24 h-56 w-56 rounded-full bg-pink-500/15 blur-3xl" />
+
+            <div className="relative p-6">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <div className="text-white text-2xl font-black">Apply as Affiliate Partner</div>
+                <div className="text-slate-400 text-sm leading-relaxed">Fill in your information to become an affiliate partner.</div>
+              </div>
+              <button
+                className="h-10 w-10 mt-0.5 rounded-xl text-slate-200 hover:text-white hover:bg-white/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 active:scale-[0.98] transition-all inline-flex items-center justify-center"
+                onClick={() => !submitting && setIsApplyOpen(false)}
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {submitError && (
+              <div className="mb-3 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm">
+                {submitError}
+              </div>
+            )}
+            {submitSuccess && (
+              <div className="mb-3 p-3 rounded-xl bg-green-500/10 border border-green-500/20 text-green-300 text-sm">
+                {submitSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-300 font-bold mb-1">First Name</label>
+                  <input
+                    value={form.firstName}
+                    onChange={(e) => setForm((p) => ({ ...p, firstName: e.target.value }))}
+                    className="w-full px-4 py-3 rounded-2xl bg-white/5 border border-white/10 text-white outline-none placeholder:text-slate-500 focus:border-indigo-400/60 focus:bg-white/[0.07] transition-colors"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-300 font-bold mb-1">Last Name</label>
+                  <input
+                    value={form.lastName}
+                    onChange={(e) => setForm((p) => ({ ...p, lastName: e.target.value }))}
+                    className="w-full px-4 py-3 rounded-2xl bg-white/5 border border-white/10 text-white outline-none placeholder:text-slate-500 focus:border-indigo-400/60 focus:bg-white/[0.07] transition-colors"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-300 font-bold mb-1">Email</label>
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+                  className="w-full px-4 py-3 rounded-2xl bg-white/5 border border-white/10 text-white outline-none placeholder:text-slate-500 focus:border-indigo-400/60 focus:bg-white/[0.07] transition-colors"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-300 font-bold mb-1">Phone</label>
+                <input
+                  type="tel"
+                  value={form.phone}
+                  onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
+                  className="w-full px-4 py-3 rounded-2xl bg-white/5 border border-white/10 text-white outline-none placeholder:text-slate-500 focus:border-indigo-400/60 focus:bg-white/[0.07] transition-colors"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-300 font-bold mb-1">Social Media Platform</label>
+                <select
+                  value={form.socialPlatform}
+                  onChange={(e) => setForm((p) => ({ ...p, socialPlatform: e.target.value }))}
+                  className="partner-select w-full px-4 py-3 rounded-2xl bg-white/5 border border-white/10 text-white outline-none focus:border-indigo-400/60 focus:bg-white/[0.07] hover:bg-white/[0.06] transition-colors"
+                  required
+                >
+                  <option value="" disabled>
+                    Select a platform
+                  </option>
+                  <option value="tiktok">TikTok</option>
+                  <option value="instagram">Instagram</option>
+                  <option value="youtube">YouTube</option>
+                  <option value="facebook">Facebook</option>
+                  <option value="twitter">Twitter/X</option>
+                  <option value="linkedin">LinkedIn</option>
+                  <option value="xiaohongshu">Xiaohongshu</option>
+                  <option value="weibo">Weibo</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-300 font-bold mb-1">Social Media Account</label>
+                <input
+                  value={form.socialMedia}
+                  onChange={(e) => setForm((p) => ({ ...p, socialMedia: e.target.value }))}
+                  placeholder="@username"
+                  className="w-full px-4 py-3 rounded-2xl bg-white/5 border border-white/10 text-white outline-none placeholder:text-slate-500 focus:border-indigo-400/60 focus:bg-white/[0.07] transition-colors"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full mt-1 py-4 rounded-full font-bold text-white bg-gradient-to-r from-indigo-600 to-pink-500 hover:from-indigo-500 hover:to-pink-400 disabled:opacity-60 shadow-lg shadow-pink-500/10"
+              >
+                {submitting ? "Submitting..." : "Submit Application"}
+              </button>
+            </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Contact Support Modal */}
+      {isContactOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={() => setIsContactOpen(false)} />
+          <div className="relative w-full max-w-md rounded-[28px] border border-white/10 bg-slate-900/80 shadow-[0_25px_80px_rgba(0,0,0,0.65)] overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200">
+            <div className="pointer-events-none absolute inset-0 rounded-[28px] bg-gradient-to-br from-purple-500/10 via-transparent to-blue-500/10" />
+            <div className="relative p-6">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <div className="text-white text-2xl font-black">Contact Support</div>
+                <div className="text-slate-400 text-sm leading-relaxed">We are here to help. Choose a channel below.</div>
+              </div>
+              <button
+                className="h-10 w-10 mt-0.5 rounded-xl text-slate-200 hover:text-white hover:bg-white/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60 active:scale-[0.98] transition-all inline-flex items-center justify-center"
+                onClick={() => setIsContactOpen(false)}
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => handleCopy("service@vgot.ai", "general")}
+                className="w-full flex items-center justify-between gap-3 p-5 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/[0.07] hover:border-purple-500/30 transition-all"
+              >
+                <div className="text-left min-w-0">
+                  <div className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">General Support</div>
+                  <div className="text-white font-mono text-lg truncate">service@vgot.ai</div>
+                </div>
+                <div className="text-slate-300 text-sm font-bold">
+                  {copiedField === "general" ? "Copied" : "Copy"}
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleCopy("affiliate@vgot.ai", "partner")}
+                className="w-full flex items-center justify-between gap-3 p-5 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/[0.07] hover:border-pink-500/30 transition-all"
+              >
+                <div className="text-left min-w-0">
+                  <div className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">Partner Program</div>
+                  <div className="text-white font-mono text-lg truncate">affiliate@vgot.ai</div>
+                </div>
+                <div className="text-slate-300 text-sm font-bold">
+                  {copiedField === "partner" ? "Copied" : "Copy"}
+                </div>
+              </button>
+            </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-
-    <div className="flex-1 overflow-y-auto space-y-6 px-1">
-      <div className="text-center space-y-3 mb-8">
-        <div className="w-16 h-16 bg-slate-800 rounded-2xl mx-auto flex items-center justify-center text-cyan-400 mb-4 shadow-[0_0_20px_rgba(34,211,238,0.2)]">
-          <Users size={32} />
-        </div>
-        <h2 className="text-2xl font-black text-white leading-tight">
-          Join the VGOT Partner Program
-        </h2>
-        <p className="text-slate-400 text-sm leading-relaxed px-4">
-          Share VGOT with your community. Every paid
-          subscription from your link earns you a{" "}
-          <span className="text-cyan-400 font-bold">
-            30% recurring commission
-          </span>
-          .
-        </p>
-      </div>
-
-      <div className="grid gap-4">
-        <div className="p-5 bg-slate-900/50 border border-slate-800 rounded-xl space-y-3">
-          <div className="w-10 h-10 bg-purple-500/10 rounded-lg flex items-center justify-center text-purple-400">
-            <TrendingUp size={20} />
-          </div>
-          <h3 className="font-bold text-white">
-            High Recurring Commission
-          </h3>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Not just the first sale. Earn 30% every month as
-            long as your user keeps their subscription.
-          </p>
-        </div>
-        <div className="p-5 bg-slate-900/50 border border-slate-800 rounded-xl space-y-3">
-          <div className="w-10 h-10 bg-blue-500/10 rounded-lg flex items-center justify-center text-blue-400">
-            <CreditCard size={20} />
-          </div>
-          <h3 className="font-bold text-white">
-            Stripe Automated Payouts
-          </h3>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            We handle Stripe Connect and send commissions
-            directly to your bank account.
-          </p>
-        </div>
-        <div className="p-5 bg-slate-900/50 border border-slate-800 rounded-xl space-y-3">
-          <div className="w-10 h-10 bg-pink-500/10 rounded-lg flex items-center justify-center text-pink-400">
-            <Download size={20} />
-          </div>
-          <h3 className="font-bold text-white">
-            Exclusive Marketing Resources
-          </h3>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Get official demo videos, banners and copy templates
-            to boost your promotion.
-          </p>
-        </div>
-      </div>
-
-      <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl text-center space-y-4 mt-8">
-        <h3 className="font-bold text-white">
-          Ready to start earning?
-        </h3>
-        <p className="text-xs text-slate-400">
-          Tell us briefly about your audience. After you apply,
-          our team reviews within 24 hours.
-        </p>
-        <div className="flex flex-col gap-3">
-          <button className="w-full py-3 bg-white text-slate-950 font-bold rounded-lg hover:bg-slate-200 transition-colors">
-            Apply as Partner
-          </button>
-          <button className="w-full py-3 bg-transparent border border-slate-700 text-white font-bold rounded-lg hover:bg-slate-800 transition-colors">
-            Contact Support
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-);
+  );
+};
 
 // 8. Credits & Usage
 const CreditsUsageView = ({
@@ -5315,6 +5629,430 @@ const CreditsUsageView = ({
     </div>
   </div>
 );
+
+// 9. Billing & Plans
+const BillingPlansView = ({
+  onBack,
+  apiBase,
+  token,
+  onRefreshUser,
+}: {
+  onBack: () => void;
+  apiBase: string;
+  token: string | null;
+  onRefreshUser: () => void;
+}) => {
+  const [cycle, setCycle] = useState<"monthly" | "yearly">("monthly");
+  const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
+  const [openFeatures, setOpenFeatures] = useState<Record<string, boolean>>({
+    free: true,
+    creator: false,
+    business: false,
+    enterprise: false,
+  });
+
+  const startMembershipCheckout = async (tier: "creator" | "business") => {
+    if (!token) {
+      alert("请先登录后再订阅");
+      return;
+    }
+    try {
+      setLoadingPlan(`sub:${tier}`);
+      const res = await fetch(`${apiBase}/api/membership/checkout`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ tier, cycle }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data?.detail || "创建订阅会话失败");
+        return;
+      }
+      const url = data?.checkout_url;
+      if (!url) {
+        alert("未返回 checkout_url");
+        return;
+      }
+      window.location.href = url;
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "网络错误");
+    } finally {
+      setLoadingPlan(null);
+    }
+  };
+
+  const startCreditTopup = async (pack: "10" | "50" | "100") => {
+    if (!token) {
+      alert("请先登录后再充值");
+      return;
+    }
+
+    const productMap: Record<"10" | "50" | "100", string | undefined> = {
+      "10": import.meta.env.VITE_STRIPE_PRODUCT_CREDITS_10,
+      "50": import.meta.env.VITE_STRIPE_PRODUCT_CREDITS_50,
+      "100": import.meta.env.VITE_STRIPE_PRODUCT_CREDITS_100,
+    };
+    const productId = productMap[pack];
+    if (!productId) {
+      alert(
+        "缺少积分充值的 Stripe Product 配置（VITE_STRIPE_PRODUCT_CREDITS_10/50/100）",
+      );
+      return;
+    }
+
+    try {
+      setLoadingPlan(`credits:${pack}`);
+      const res = await fetch(
+        `${apiBase}/api/payments/create-checkout-session-by-product`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            product_id: productId,
+            quantity: 1,
+            currency: "usd",
+          }),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data?.detail || "创建支付会话失败");
+        return;
+      }
+      const url = data?.url;
+      if (!url) {
+        alert("未返回 url");
+        return;
+      }
+      window.location.href = url;
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "网络错误");
+    } finally {
+      setLoadingPlan(null);
+    }
+  };
+  type PlanId = "free" | "creator" | "business" | "enterprise";
+
+  type FeatureKind = "ok" | "partial" | "locked";
+  type FeatureItem = { label: string; value: string; kind: FeatureKind };
+
+  const featureIcon = (kind: FeatureKind) => {
+    if (kind === "locked") return <Lock size={14} className="text-slate-500" />;
+    if (kind === "partial") return <Zap size={14} className="text-amber-400" />;
+    return <Check size={14} className="text-emerald-400" />;
+  };
+
+  const plans: Array<{
+    id: PlanId;
+    name: string;
+    tagline: string;
+    priceMonthly: string;
+    priceYearly: string;
+    billedNote: string;
+    credits: string;
+    description: string;
+    popular?: boolean;
+    features: FeatureItem[];
+    cta: string;
+    onClick: () => void;
+  }> = [
+    {
+      id: "free",
+      name: "Free",
+      tagline: "Experience",
+      priceMonthly: "$0",
+      priceYearly: "$0",
+      billedNote: "",
+      credits: "0 (200 signup bonus)",
+      description: "Try the workflow with signup credits.",
+      features: [
+        { label: "Script Generation", value: "Free (50/day)", kind: "ok" },
+        { label: "Character Image", value: "50 credits/generation", kind: "ok" },
+        { label: "HyperSell Video", value: "150 credits/generation", kind: "ok" },
+        { label: "SuperIP Video", value: "Locked", kind: "locked" },
+        { label: "Max Duration", value: "N/A", kind: "locked" },
+        { label: "HD Enhancement", value: "N/A", kind: "locked" },
+        { label: "Voice Creation", value: "N/A", kind: "locked" },
+        { label: "Watermark-free Export", value: "With watermark", kind: "partial" },
+        { label: "Priority Queue", value: "Standard", kind: "partial" },
+        { label: "API Access", value: "N/A", kind: "locked" },
+      ],
+      cta: "Get Started",
+      onClick: () => alert("免费计划无需订阅，直接使用即可"),
+    },
+    {
+      id: "creator",
+      name: "Creator",
+      tagline: "Pro",
+      priceMonthly: "$29",
+      priceYearly: "$290",
+      billedNote: cycle === "monthly" ? "Billed monthly" : "Billed yearly",
+      credits: "30,000",
+      description: "Perfect for individual creators and small content teams.",
+      features: [
+        { label: "Script Generation", value: "Unlimited", kind: "ok" },
+        { label: "Character Image", value: "50 credits/generation", kind: "ok" },
+        { label: "HyperSell Video", value: "150 credits/generation", kind: "ok" },
+        { label: "SuperIP Video", value: "70 credits/second", kind: "ok" },
+        { label: "Max Duration", value: "2 minutes", kind: "ok" },
+        { label: "HD Enhancement", value: "800 credits/time", kind: "partial" },
+        { label: "Voice Creation", value: "3000 credits/voice", kind: "ok" },
+        { label: "Watermark-free Export", value: "Yes", kind: "ok" },
+        { label: "Priority Queue", value: "High-speed", kind: "ok" },
+        { label: "API Access", value: "N/A", kind: "locked" },
+      ],
+      cta: "Subscribe",
+      onClick: () => startMembershipCheckout("creator"),
+    },
+    {
+      id: "business",
+      name: "Business",
+      tagline: "Commercial",
+      priceMonthly: "$99",
+      priceYearly: "$990",
+      billedNote: cycle === "monthly" ? "Billed monthly" : "Billed yearly",
+      credits: "120,000",
+      description: "For agencies and growing e-commerce brands.",
+      popular: true,
+      features: [
+        { label: "Script Generation", value: "Unlimited", kind: "ok" },
+        { label: "Character Image", value: "Free Unlimited", kind: "ok" },
+        { label: "HyperSell Video", value: "150 credits/generation", kind: "ok" },
+        { label: "SuperIP Video", value: "70 credits/second", kind: "ok" },
+        { label: "Max Duration", value: "10 minutes", kind: "ok" },
+        { label: "HD Enhancement", value: "500 credits (40% off)", kind: "ok" },
+        { label: "Voice Creation", value: "First free", kind: "ok" },
+        { label: "Watermark-free Export", value: "Yes", kind: "ok" },
+        { label: "Priority Queue", value: "High-speed", kind: "ok" },
+        { label: "API Access", value: "N/A", kind: "locked" },
+      ],
+      cta: "Go Business",
+      onClick: () => startMembershipCheckout("business"),
+    },
+    {
+      id: "enterprise",
+      name: "Enterprise",
+      tagline: "Enterprise",
+      priceMonthly: "Custom",
+      priceYearly: "Custom",
+      billedNote: "",
+      credits: "Custom quota",
+      description: "Custom solutions for large teams and platforms.",
+      features: [
+        { label: "Script Generation", value: "Unlimited", kind: "ok" },
+        { label: "Character Image", value: "Free Unlimited", kind: "ok" },
+        { label: "HyperSell Video", value: "150 credits/generation", kind: "ok" },
+        { label: "SuperIP Video", value: "Custom rate", kind: "ok" },
+        { label: "Max Duration", value: "Unlimited/Custom", kind: "ok" },
+        { label: "HD Enhancement", value: "Custom discount", kind: "ok" },
+        { label: "Voice Creation", value: "On-demand gift", kind: "ok" },
+        { label: "Watermark-free Export", value: "Yes", kind: "ok" },
+        { label: "Priority Queue", value: "Highest priority", kind: "ok" },
+        { label: "API Access", value: "Full API", kind: "ok" },
+      ],
+      cta: "Contact Sales",
+      onClick: () => alert("请联系 sales@vgot.ai 获取企业版方案"),
+    },
+  ];
+
+  useEffect(() => {
+    // Stripe return (best-effort): refresh user and clean query params
+    try {
+      const url = new URL(window.location.href);
+      const p = url.searchParams;
+      const mightBeReturn =
+        p.has("session_id") ||
+        p.get("status") === "success" ||
+        p.get("stripe") === "success" ||
+        p.get("paid") === "true";
+      if (!mightBeReturn) return;
+      (async () => {
+        await new Promise((r) => setTimeout(r, 600));
+        onRefreshUser();
+        url.search = "";
+        window.history.replaceState({}, document.title, url.toString());
+      })();
+    } catch {
+      // ignore
+    }
+  }, [onRefreshUser]);
+
+  return (
+    <div className="flex flex-col h-full pb-24 animate-in fade-in slide-in-from-right duration-300">
+      <div className="flex items-center gap-3 mb-6">
+        <button
+          onClick={onBack}
+          className="p-2 hover:bg-slate-800 rounded-full transition-colors"
+        >
+          <ChevronLeft size={24} className="text-slate-400" />
+        </button>
+        <h1 className="text-xl font-bold text-white">Billing & Plans</h1>
+      </div>
+
+      <div className="flex-1 overflow-y-auto space-y-6 px-1">
+        <div className="text-center space-y-3">
+          <h2 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-400 to-cyan-300">
+            Billing & Plans
+          </h2>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Choose the plan that suits you best and unlock more creative possibilities
+          </p>
+
+          {/* Segmented control (cleaner + mobile-friendly) */}
+          <div className="mt-2 w-full max-w-sm mx-auto p-1 rounded-full bg-slate-900/60 border border-white/10 flex items-center gap-1">
+            <button
+              className={cn(
+                "flex-1 py-2 rounded-full text-xs font-bold transition-all",
+                cycle === "monthly"
+                  ? "bg-gradient-to-r from-indigo-600 to-pink-500 text-white shadow"
+                  : "text-slate-400 hover:text-white",
+              )}
+              onClick={() => setCycle("monthly")}
+            >
+              Monthly
+            </button>
+            <button
+              className={cn(
+                "flex-1 py-2 rounded-full text-xs font-bold transition-all relative",
+                cycle === "yearly"
+                  ? "bg-gradient-to-r from-indigo-600 to-pink-500 text-white shadow"
+                  : "text-slate-400 hover:text-white",
+              )}
+              onClick={() => setCycle("yearly")}
+            >
+              Yearly
+              <span className="ml-2 inline-flex items-center text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                Save 20%
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {plans.map((plan) => {
+            const price = cycle === "monthly" ? plan.priceMonthly : plan.priceYearly;
+            const isLoading = loadingPlan?.startsWith(plan.id);
+            return (
+              <div
+                key={plan.id}
+                className={cn(
+                  "relative rounded-2xl bg-gradient-to-br from-white/5 to-white/0 border backdrop-blur-sm p-5",
+                  plan.popular ? "border-fuchsia-500/50" : "border-white/10",
+                )}
+              >
+                <div className="relative flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-white text-xl font-black flex items-center gap-2">
+                      {plan.name}
+                      {plan.id === "business" && <span>👑</span>}
+                      {plan.id === "enterprise" && <span>🏢</span>}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">{plan.tagline}</div>
+                  </div>
+
+                  <div className="text-right shrink-0">
+                    <div className="text-3xl font-black text-white leading-none">
+                      {price}
+                    </div>
+                    {plan.billedNote && (
+                      <div className="text-[11px] text-slate-500 mt-1">
+                        {plan.billedNote}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <div className="text-xs text-slate-500 font-bold uppercase tracking-wider">
+                    Monthly Credits
+                  </div>
+                  <div className="text-white font-bold">
+                    {plan.credits}
+                    {(plan.id === "creator" || plan.id === "business") && (
+                      <span className="ml-2 text-xs text-slate-500 font-normal">
+                        (expires monthly)
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-sm text-slate-500 mt-3 leading-relaxed">
+                  {plan.description}
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOpenFeatures((p) => ({
+                      ...p,
+                      [plan.id]: !p[plan.id],
+                    }))
+                  }
+                  className="w-full mt-4 flex items-center justify-between px-4 py-3 rounded-xl bg-white/[0.04] border border-white/10 hover:bg-white/[0.06] transition-colors"
+                >
+                  <span className="text-[11px] font-black text-slate-300 uppercase tracking-wider">
+                    Core Features
+                  </span>
+                  <ChevronDown
+                    size={18}
+                    className={cn(
+                      "text-slate-500 transition-transform",
+                      openFeatures[plan.id] && "rotate-180",
+                    )}
+                  />
+                </button>
+
+                {openFeatures[plan.id] && (
+                  <div className="mt-3 rounded-xl bg-black/20 border border-white/5 p-4 space-y-2">
+                    {plan.features.map((f) => (
+                      <div
+                        key={f.label}
+                        className="flex items-start justify-between gap-3 text-sm"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {featureIcon(f.kind)}
+                          <span className="text-slate-300 font-medium truncate">
+                            {f.label}
+                          </span>
+                        </div>
+                        <span className="text-slate-400 font-semibold text-right">
+                          {f.value}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  disabled={!!loadingPlan}
+                  onClick={plan.onClick}
+                  className={cn(
+                    "w-full mt-4 py-3 rounded-full font-bold text-sm transition-all active:scale-[0.99]",
+                    plan.popular
+                      ? "bg-gradient-to-r from-indigo-600 to-pink-500 text-white shadow-lg shadow-fuchsia-500/10"
+                      : "bg-white/5 border border-white/10 text-white hover:bg-white/10",
+                    !!loadingPlan && "opacity-60",
+                  )}
+                >
+                  {isLoading ? "Processing..." : plan.cta}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+      </div>
+    </div>
+  );
+};
 
 // 6. Profile Page
 type UserProfile = {
@@ -6035,6 +6773,14 @@ export default function App() {
           {activeTab === "credits_usage" && (
             <CreditsUsageView
               onBack={() => setActiveTab("profile")}
+            />
+          )}
+          {activeTab === "billing" && (
+            <BillingPlansView
+              onBack={() => setActiveTab("profile")}
+              apiBase={API_BASE}
+              token={token}
+              onRefreshUser={fetchUser}
             />
           )}
         </main>
