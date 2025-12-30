@@ -5459,7 +5459,237 @@ const CreditsUsageView = ({
   onBack,
 }: {
   onBack: () => void;
-}) => (
+}) => {
+  const [customCredits, setCustomCredits] = useState("");
+  const [isCustomFocused, setIsCustomFocused] = useState(false);
+
+  const token = localStorage.getItem("access_token");
+  const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || "";
+
+  const [creditsData, setCreditsData] = useState<{
+    credits: number;
+    monthly_credits: number;
+    tier: string;
+  }>({ credits: 0, monthly_credits: 0, tier: "Free" });
+
+  const [transactions, setTransactions] = useState<
+    Array<{ action?: string; date?: string; change?: number; status?: string }>
+  >([]);
+  const [loadingCredits, setLoadingCredits] = useState(true);
+  const [creditsError, setCreditsError] = useState<string | null>(null);
+  const [purchasingCustom, setPurchasingCustom] = useState(false);
+  const [customError, setCustomError] = useState<string | null>(null);
+
+  const ITEMS_PER_PAGE = 7;
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const creditsNumber = customCredits ? parseInt(customCredits, 10) : 0;
+  const customPrice = creditsNumber ? creditsNumber / 1000 : 0;
+  const isStep10 = creditsNumber > 0 && creditsNumber % 10 === 0;
+  const isValidCustom = creditsNumber >= 1000 && isStep10;
+
+  // cents = credits / 10 (because 10 credits = 1 cent)
+  const customPriceInCents = isStep10 ? creditsNumber / 10 : 0;
+
+  const fetchCreditsData = async () => {
+    if (!token) {
+      setCreditsError("请先登录");
+      setLoadingCredits(false);
+      return;
+    }
+    try {
+      setLoadingCredits(true);
+      setCreditsError(null);
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${token}`,
+      };
+
+      // balance
+      const balanceRes = await fetch(`${apiBase}/api/credits/balance`, {
+        headers,
+      });
+      const balanceJson = await balanceRes.json().catch(() => ({}));
+      if (!balanceRes.ok) {
+        throw new Error(balanceJson?.detail || "获取积分余额失败");
+      }
+      if (balanceJson?.success) {
+        setCreditsData(balanceJson.data);
+      }
+
+      // history
+      // Backend enforces limit <= 100 (422 otherwise). Fetch enough pages and concat.
+      const HISTORY_LIMIT = 100;
+      const HISTORY_PAGES = 2; // 2 * 100 = 200 records max
+      let allTx: any[] = [];
+      for (let p = 0; p < HISTORY_PAGES; p++) {
+        const offset = p * HISTORY_LIMIT;
+        const historyRes = await fetch(
+          `${apiBase}/api/credits/history?limit=${HISTORY_LIMIT}&offset=${offset}`,
+          { headers },
+        );
+        const historyJson = await historyRes.json().catch(() => ({}));
+        if (!historyRes.ok) {
+          throw new Error(historyJson?.detail || "获取积分明细失败");
+        }
+        if (historyJson?.success) {
+          const tx = historyJson?.data?.transactions;
+          if (Array.isArray(tx)) {
+            allTx = allTx.concat(tx);
+            // if returned less than limit, no more pages
+            if (tx.length < HISTORY_LIMIT) break;
+          } else {
+            break;
+          }
+        }
+      }
+      setTransactions(normalizeTransactions(allTx));
+      setCurrentPage(1);
+    } catch (e: any) {
+      const msg =
+        typeof e?.message === "string"
+          ? e.message
+          : typeof e === "string"
+            ? e
+            : e && typeof e === "object"
+              ? (e.detail || e.error || JSON.stringify(e))
+              : "加载失败";
+      setCreditsError(msg || "加载失败");
+    } finally {
+      setLoadingCredits(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCreditsData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const totalPages = Math.max(1, Math.ceil(transactions.length / ITEMS_PER_PAGE));
+  const page = Math.min(currentPage, totalPages);
+  const startIndex = (page - 1) * ITEMS_PER_PAGE;
+  const currentTransactions = transactions.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+
+  const parseCreditsChange = (t: any): number => {
+    // Backend (vgot-app-backend) returns: { id, action, date, cost: "+10"|"-50", status }
+    // Other shapes might include change / credits_change. Normalize to number.
+    const direct = t?.change ?? t?.credits_change;
+    if (typeof direct === "number") return direct;
+    if (typeof direct === "string") {
+      const n = Number(direct);
+      return Number.isNaN(n) ? 0 : n;
+    }
+    if (typeof t?.cost === "string") {
+      const n = Number(t.cost.replace(/[^0-9+\-\.]/g, ""));
+      return Number.isNaN(n) ? 0 : n;
+    }
+    if (typeof t?.cost === "number") return t.cost;
+    return 0;
+  };
+
+  const normalizeTransactions = (
+    tx: any[],
+  ): Array<{ action?: string; date?: string; change?: number; status?: string }> => {
+    return (tx || []).map((t: any) => ({
+      action: t?.action ?? t?.action_type ?? "",
+      date: t?.date ?? t?.created_at ?? "",
+      change: parseCreditsChange(t),
+      status: t?.status ?? "",
+    }));
+  };
+
+  const formatChange = (n: any) => {
+    const num = typeof n === "number" ? n : Number(n);
+    if (Number.isNaN(num)) return "0";
+    return `${num > 0 ? "+" : ""}${num}`;
+  };
+
+  const startCustomCheckout = async () => {
+    if (!token) {
+      setCustomError("请先登录");
+      return;
+    }
+    if (creditsNumber < 1000) {
+      setCustomError("最少购买 1,000 积分");
+      return;
+    }
+    if (!isStep10) {
+      setCustomError("输入需为 10 的倍数（每 1 美分 = 10 积分）");
+      return;
+    }
+
+    try {
+      setCustomError(null);
+      setPurchasingCustom(true);
+      const res = await fetch(`${apiBase}/api/payments/create-checkout-session`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ amount: customPriceInCents, currency: "usd" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.detail || "创建支付会话失败");
+      }
+      const url = data?.url;
+      if (!url) {
+        throw new Error("未返回支付链接");
+      }
+      window.location.href = url;
+    } catch (e: any) {
+      setCustomError(e?.message || "网络错误");
+    } finally {
+      setPurchasingCustom(false);
+    }
+  };
+
+  const startCreditTopup = async (pack: "10" | "50" | "100") => {
+    if (!token) {
+      setCreditsError("请先登录");
+      return;
+    }
+
+    // Desktop implementation uses: amount in cents ($10/$50/$100) -> /api/payments/create-checkout-session
+    const amountMap: Record<"10" | "50" | "100", number> = {
+      "10": 10 * 100,
+      "50": 50 * 100,
+      "100": 100 * 100,
+    };
+    const amount = amountMap[pack];
+
+    try {
+      const res = await fetch(`${apiBase}/api/payments/create-checkout-session`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ amount, currency: "usd" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.detail || "创建支付会话失败");
+      }
+      const url = data?.url;
+      if (!url) {
+        throw new Error("未返回支付链接");
+      }
+      window.location.href = url;
+    } catch (e: any) {
+      setCreditsError(
+        typeof e?.message === "string"
+          ? e.message
+          : typeof e === "string"
+            ? e
+            : e && typeof e === "object"
+              ? (e.detail || e.error || JSON.stringify(e))
+              : "网络错误",
+      );
+    }
+  };
+
+  return (
   <div className="flex flex-col h-full pb-24 animate-in fade-in slide-in-from-right duration-300">
     <div className="flex items-center gap-3 mb-6">
       <button
@@ -5475,93 +5705,157 @@ const CreditsUsageView = ({
 
     <div className="flex-1 overflow-y-auto space-y-8 px-1">
       {/* Balance Card */}
-      <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-fuchsia-500/10 rounded-full blur-3xl -mr-10 -mt-10" />
-        <div className="relative z-10">
-          <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">
-            Current Available Credits
-          </div>
-          <div className="flex items-baseline gap-2 mb-4">
-            <span className="text-4xl font-black text-white">
-              33,040
-            </span>
-            <span className="text-sm font-bold text-fuchsia-400">
-              Credits
-            </span>
-          </div>
-          <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden mb-2">
-            <div className="h-full w-[80%] bg-gradient-to-r from-fuchsia-600 to-pink-500" />
-          </div>
-          <div className="text-xs text-slate-500">
-            Monthly quota used 80%
+      <div className="relative rounded-3xl p-[1px] bg-gradient-to-r from-fuchsia-500/70 via-purple-500/50 to-pink-500/60 shadow-[0_14px_40px_rgba(0,0,0,0.35)]">
+        <div className="relative rounded-3xl !bg-[#32133a] bg-gradient-to-br from-fuchsia-600/45 via-purple-700/40 to-pink-600/35 border border-white/10 overflow-hidden">
+          {/* subtle tint layer so the card isn't pure black */}
+          <div className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_20%_10%,rgba(236,72,153,0.35)_0%,transparent_55%),radial-gradient(circle_at_80%_80%,rgba(168,85,247,0.28)_0%,transparent_60%),linear-gradient(135deg,rgba(236,72,153,0.18),rgba(168,85,247,0.12))]" />
+          <div className="absolute -top-10 -right-10 z-0 w-60 h-60 bg-fuchsia-500/25 rounded-full blur-3xl" />
+          <div className="absolute -bottom-16 -left-16 z-0 w-64 h-64 bg-purple-500/20 rounded-full blur-3xl" />
+
+          <div className="relative z-10 p-6">
+            <div className="absolute inset-0 rounded-3xl border border-white/10 !bg-fuchsia-500/12 pointer-events-none" />
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-slate-300 text-[10px] font-bold uppercase tracking-widest">
+                Current Available Credits
+              </div>
+              <div className="text-[10px] font-bold px-2 py-1 rounded-full bg-fuchsia-500/10 border border-fuchsia-500/20 text-fuchsia-300">
+                {creditsData.tier || ""}
+              </div>
+            </div>
+
+            <div className="flex items-baseline gap-2 mb-5">
+              <span className="text-5xl font-black text-white tracking-tight drop-shadow-sm">
+                {loadingCredits ? "…" : creditsData.credits.toLocaleString()}
+              </span>
+              <span className="text-sm font-bold text-fuchsia-300">Credits</span>
+            </div>
+
+            <div className="w-full h-2.5 bg-white/10 rounded-full overflow-hidden mb-2.5 border border-white/5">
+              <div className="h-full w-[87%] bg-gradient-to-r from-fuchsia-500 to-pink-500 shadow-[0_0_10px_rgba(236,72,153,0.5)]" />
+            </div>
+            <div className="text-xs text-slate-300/80 font-medium">
+              Monthly quota used 87%
+            </div>
           </div>
         </div>
       </div>
 
       {/* Purchase Packs */}
       <div className="space-y-4">
-        <div className="flex items-center gap-2 mb-2">
-          <Zap size={16} className="text-yellow-500" />
+        <div className="flex items-center gap-2 mb-2 px-1">
+          <div className="p-1 bg-yellow-500/10 rounded-md">
+            <Zap size={14} className="text-yellow-500" fill="currentColor" />
+          </div>
           <h3 className="text-sm font-bold text-yellow-500 uppercase tracking-wide">
             Purchase Extra Credit Packs
           </h3>
         </div>
         {[
-          { amount: "10,000", price: "$10", tag: null },
-          { amount: "55,000", price: "$50", tag: "Best Value" },
-          { amount: "120,000", price: "$100", tag: null },
+          { amount: "10,000", price: "$10", highlight: false },
+          { amount: "55,000", price: "$50", highlight: true },
+          { amount: "120,000", price: "$100", highlight: false },
         ].map((pack) => (
           <button
             key={pack.amount}
-            className="w-full flex items-center justify-between p-4 bg-slate-900 border border-slate-800 rounded-xl hover:border-yellow-500/30 transition-all group active:scale-[0.98]"
+            type="button"
+            onClick={() => {
+              // Desktop-style flow: pick pack -> send amount in cents to /api/payments/create-checkout-session
+              const packKey = pack.price === "$10" ? "10" : pack.price === "$50" ? "50" : "100";
+              startCreditTopup(packKey as "10" | "50" | "100");
+            }}
+            className={cn(
+              "relative w-full flex items-center justify-between p-5 rounded-2xl transition-all group active:scale-[0.99]",
+              pack.highlight 
+                ? "bg-fuchsia-500/10 border border-fuchsia-500/50 shadow-[0_0_20px_rgba(217,70,239,0.1)]" 
+                : "bg-[#131420] border border-slate-700 hover:border-slate-500"
+            )}
           >
             <div className="flex items-center gap-4">
-              <div className="w-10 h-10 rounded-full bg-yellow-500/10 flex items-center justify-center text-yellow-500 group-hover:shadow-[0_0_10px_rgba(234,179,8,0.3)] transition-all">
-                <Zap size={20} fill="currentColor" />
+              <div className="w-12 h-12 rounded-full bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center text-yellow-500 group-hover:scale-105 transition-transform duration-300 shadow-[0_0_15px_rgba(234,179,8,0.1)]">
+                <Zap size={22} fill="currentColor" />
               </div>
               <div className="text-left">
-                <div className="text-white font-bold text-lg">
-                  {pack.amount}{" "}
-                  <span className="text-sm font-normal text-slate-400">
-                    Credits
-                  </span>
+                <div className="text-white font-bold text-lg tracking-tight">
+                  {pack.amount} <span className="text-sm font-normal text-slate-400 ml-1">Credits</span>
                 </div>
-                <div className="text-xs text-slate-500">
+                <div className="text-xs font-medium text-slate-500">
                   Instant delivery
                 </div>
               </div>
             </div>
-            <div className="flex flex-col items-end gap-1">
-              <span className="bg-white text-slate-950 font-bold px-3 py-1 rounded-lg text-sm group-hover:bg-yellow-400 transition-colors">
+            <div className="flex flex-col items-end justify-center h-full pl-4">
+              <span className="bg-white text-slate-950 font-bold px-5 py-2.5 rounded-xl text-sm shadow-lg shadow-white/5 group-hover:bg-slate-200 transition-all min-w-[70px] text-center">
                 {pack.price}
               </span>
-              {pack.tag && (
-                <span className="text-[10px] font-bold text-fuchsia-400 bg-fuchsia-500/10 px-1.5 py-0.5 rounded uppercase">
-                  {pack.tag}
-                </span>
-              )}
             </div>
           </button>
         ))}
 
         {/* Custom Amount */}
-        <div className="p-4 bg-slate-950 border border-dashed border-slate-800 rounded-xl flex items-center justify-between opacity-60">
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 rounded-full bg-slate-900 flex items-center justify-center text-slate-600">
-              <Zap size={20} />
-            </div>
-            <div>
-              <div className="text-slate-400 font-bold">
-                Custom
+        <div className={cn(
+          "relative w-full p-5 rounded-2xl transition-all duration-300",
+          isCustomFocused || customCredits 
+            ? "bg-[#131420] border border-fuchsia-500/50 shadow-[0_0_20px_rgba(217,70,239,0.1)]" 
+            : "bg-[#0f111a] border border-dashed border-slate-800 opacity-80 hover:opacity-100"
+        )}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4 flex-1">
+              <div className={cn(
+                "w-12 h-12 rounded-full flex items-center justify-center transition-colors",
+                isCustomFocused || customCredits
+                  ? "bg-fuchsia-500/10 border border-fuchsia-500/20 text-fuchsia-500"
+                  : "bg-slate-800/50 border border-slate-700/50 text-slate-500"
+              )}>
+                <Zap size={22} />
               </div>
-              <div className="text-[10px] text-slate-600">
-                1 USD = 1,000 Credits
+              <div className="flex-1">
+                <div className="relative flex items-baseline gap-2">
+                  <input 
+                    type="text"
+                    inputMode="numeric"
+                    value={customCredits}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '');
+                      setCustomCredits(val);
+                      if (customError) setCustomError(null);
+                    }}
+                    onFocus={() => setIsCustomFocused(true)}
+                    onBlur={() => setIsCustomFocused(false)}
+                    placeholder="Custom"
+                    className={cn(
+                      "bg-transparent p-0 pb-1 text-lg font-bold text-white placeholder:text-slate-500 focus:ring-0 w-32 outline-none border-b-2 transition-all duration-300",
+                      isCustomFocused || customCredits ? "border-fuchsia-600" : "border-transparent"
+                    )}
+                  />
+                  <span className="text-xs font-medium text-slate-500">Credits</span>
+                </div>
+                <div className="text-[10px] text-slate-500 font-medium mt-1.5">
+                  {customError ? (
+                    <span className="text-red-400">{customError}</span>
+                  ) : (
+                    <>1 USD = 1,000 Credits · 输入需为10的倍数 (每1美分=10积分)</>
+                  )}
+                </div>
               </div>
             </div>
+
+            <button 
+              disabled={!isValidCustom}
+              onClick={startCustomCheckout}
+              className={cn(
+                "px-5 py-2.5 rounded-xl text-sm font-bold min-w-[90px] text-center transition-all ml-4",
+                isValidCustom
+                  ? "bg-white text-slate-950 shadow-lg shadow-white/10"
+                  : "bg-slate-800 text-slate-500 cursor-not-allowed"
+              )}
+            >
+              {purchasingCustom ? (
+                <RefreshCw size={18} className="animate-spin opacity-60 mx-auto" />
+              ) : (
+                `$${customPrice.toFixed(2)}`
+              )}
+            </button>
           </div>
-          <span className="text-slate-600 font-bold">
-            $0.00
-          </span>
         </div>
       </div>
 
@@ -5571,64 +5865,139 @@ const CreditsUsageView = ({
           <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wide flex items-center gap-2">
             <BarChart3 size={16} /> Usage Details
           </h3>
-          <button className="text-xs text-cyan-400 hover:text-cyan-300">
-            View All
-          </button>
         </div>
 
-        <div className="space-y-2">
-          {[
-            {
-              action: "superip_video_gen",
-              date: "09:57",
-              change: -1470,
-            },
-            {
-              action: "voice_gen_waveform",
-              date: "09:54",
-              change: -3000,
-            },
-            {
-              action: "script_extraction",
-              date: "09:24",
-              change: 0,
-            },
-          ].map((item, i) => (
-            <div
-              key={i}
-              className="flex items-center justify-between p-3 rounded-lg bg-slate-900/30 border border-white/5 text-sm"
+        {creditsError ? (
+          <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800 text-slate-300 text-sm">
+            <div className="mb-2 text-red-400 font-semibold">
+              {typeof creditsError === "string" ? creditsError : "加载失败"}
+            </div>
+            <button
+              onClick={fetchCreditsData}
+              className="text-xs text-cyan-400 hover:text-cyan-300"
             >
-              <div>
-                <div className="text-slate-300 font-medium">
-                  {item.action}
+              Retry
+            </button>
+          </div>
+        ) : loadingCredits ? (
+          <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800 text-slate-400 text-sm">
+            Loading…
+          </div>
+        ) : (
+          <>
+            <div className="space-y-2">
+              {currentTransactions.length === 0 ? (
+                <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800 text-slate-400 text-sm">
+                  No records
                 </div>
-                <div className="text-xs text-slate-600">
-                  {item.date}
-                </div>
-              </div>
-              <div className="text-right">
-                <div
+              ) : (
+                currentTransactions.map((item, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between p-4 rounded-xl bg-slate-900/50 border border-slate-800/50 hover:bg-slate-900/80 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={cn(
+                          "w-2 h-2 rounded-full",
+                          (item.change ?? 0) < 0
+                            ? "bg-fuchsia-500"
+                            : "bg-emerald-500",
+                        )}
+                      />
+                      <div>
+                        <div className="text-slate-200 font-bold text-sm capitalize">
+                          {(item.action || "").replace(/_/g, " ")}
+                        </div>
+                        <div className="text-xs text-slate-500 font-mono mt-0.5">
+                          {item.date || ""}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div
+                        className={cn(
+                          "font-mono font-bold text-sm",
+                          (item.change ?? 0) < 0
+                            ? "text-white"
+                            : "text-emerald-400",
+                        )}
+                      >
+                        {formatChange(item.change)}
+                      </div>
+                      <div
+                        className={cn(
+                          "text-[10px] px-1.5 py-0.5 rounded inline-block mt-1 font-medium",
+                          "bg-slate-800 text-slate-400",
+                        )}
+                      >
+                        {item.status || "Completed"}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Pagination (7 per page) */}
+            {transactions.length > ITEMS_PER_PAGE && (
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  disabled={page <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                   className={cn(
-                    "font-mono font-bold",
-                    item.change < 0
-                      ? "text-red-400"
-                      : "text-green-400",
+                    "px-3 py-2 rounded-lg text-xs font-bold border transition-colors",
+                    page <= 1
+                      ? "bg-slate-900/30 border-slate-800 text-slate-600 cursor-not-allowed"
+                      : "bg-slate-900/60 border-slate-700 text-slate-200 hover:bg-slate-900",
                   )}
                 >
-                  {item.change > 0 ? "+" : ""}
-                  {item.change}
+                  Prev
+                </button>
+
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: Math.min(5, totalPages) }).map((_, idx) => {
+                    // show up to 5 pages, centered around current
+                    const start = Math.max(1, Math.min(totalPages - 4, page - 2));
+                    const pnum = start + idx;
+                    return (
+                      <button
+                        key={pnum}
+                        onClick={() => setCurrentPage(pnum)}
+                        className={cn(
+                          "w-9 h-9 rounded-lg text-xs font-bold border transition-colors",
+                          pnum === page
+                            ? "bg-fuchsia-600/30 border-fuchsia-500/60 text-white"
+                            : "bg-slate-900/60 border-slate-700 text-slate-200 hover:bg-slate-900",
+                        )}
+                      >
+                        {pnum}
+                      </button>
+                    );
+                  })}
                 </div>
-                <div className="text-[10px] bg-green-500/10 text-green-500 px-1.5 rounded inline-block mt-0.5">
-                  Completed
-                </div>
+
+                <button
+                  disabled={page >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className={cn(
+                    "px-3 py-2 rounded-lg text-xs font-bold border transition-colors",
+                    page >= totalPages
+                      ? "bg-slate-900/30 border-slate-800 text-slate-600 cursor-not-allowed"
+                      : "bg-slate-900/60 border-slate-700 text-slate-200 hover:bg-slate-900",
+                  )}
+                >
+                  Next
+                </button>
               </div>
-            </div>
-          ))}
-        </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   </div>
-);
+  );
+};
 
 // 9. Billing & Plans
 const BillingPlansView = ({
@@ -5664,7 +6033,7 @@ const BillingPlansView = ({
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ tier, cycle }),
+        body: JSON.stringify({ tier, cycle, platform: "mobile" }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -5868,15 +6237,30 @@ const BillingPlansView = ({
     try {
       const url = new URL(window.location.href);
       const p = url.searchParams;
+      const stripeFlag = (p.get("stripe") || "").toLowerCase();
+      const isStripeSuccess = stripeFlag === "success" || p.get("status") === "success" || p.get("paid") === "true";
+      const isStripeCancel = stripeFlag === "cancel" || p.get("status") === "cancelled";
       const mightBeReturn =
         p.has("session_id") ||
-        p.get("status") === "success" ||
-        p.get("stripe") === "success" ||
-        p.get("paid") === "true";
+        isStripeSuccess ||
+        isStripeCancel;
       if (!mightBeReturn) return;
       (async () => {
         await new Promise((r) => setTimeout(r, 600));
         onRefreshUser();
+        // Mobile app has no router routes; we land on the entry page and switch tabs.
+        // Best-effort UX: jump to Billing and show a minimal hint.
+        try {
+          if (isStripeSuccess) {
+            // @ts-ignore - setActiveTab exists in the enclosure scope of App.tsx
+            setActiveTab?.("billing");
+            alert("订阅成功，正在刷新账户…");
+          } else if (isStripeCancel) {
+            alert("已取消支付");
+          }
+        } catch {
+          // ignore
+        }
         url.search = "";
         window.history.replaceState({}, document.title, url.toString());
       })();
