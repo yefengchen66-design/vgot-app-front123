@@ -1240,7 +1240,7 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
       </div>
 
       {/* Recent Result */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-2 mt-8">
         <h2 className="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-black">
           Latest Result
         </h2>
@@ -2809,7 +2809,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                 </div>
                 <span
                   className={cn(
-                    "text-[8px] uppercase font-bold tracking-wider",
+                    "text-[10px] uppercase font-bold tracking-wider scale-75 origin-top mt-1",
                     isActive
                       ? "text-cyan-400"
                       : "text-slate-600",
@@ -3314,27 +3314,6 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                     : "No audio selected"}
                 </div>
               </div>
-
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleOpenAudioGallery();
-                }}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg border ui-tiny font-bold uppercase flex items-center gap-1.5 transition-all",
-                  selectedAudio
-                    ? "bg-cyan-500/10 border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20 hover:shadow-[0_0_10px_rgba(6,182,212,0.2)]"
-                    : "bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600"
-                )}
-              >
-                {selectedAudio ? (
-                  <>
-                    <Check size={10} strokeWidth={3} /> Use
-                  </>
-                ) : (
-                  "Select"
-                )}
-              </button>
             </div>
 
             {/* Audio List Display Box (Floating Overlay) */}
@@ -4010,7 +3989,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                   >
                     <SwitchIcon size={12} className="shrink-0" />
                     <span className="text-[10px] leading-none font-semibold">
-                      {isSendIconPink ? "Pro" : "Com"}
+                      {isSendIconPink ? "Com" : "Pro"}
                     </span>
                   </button>
                 </div>
