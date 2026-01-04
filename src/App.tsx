@@ -1,5 +1,5 @@
 import { uploadSuperIpAudio } from "./lib/superIpAudioUpload";
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 
 // Stable <img> that won’t remount when SuperIpView rerenders.
 // Defining this at module scope avoids recreating the memo component each render,
@@ -8,6 +8,28 @@ const StableImage = React.memo(
   ({ src, alt, className }: { src: string; alt: string; className?: string }) => (
     <img src={src} alt={alt} className={className} draggable={false} />
   ),
+);
+
+// Compact bidirectional "switch" icon (matches the two-opposed-arrows style from the reference image).
+const SwitchIcon = ({ size = 14, className }: { size?: number; className?: string }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    className={className}
+    aria-hidden="true"
+    focusable="false"
+  >
+    <path
+      d="M3 7h14l-3-3M21 17H7l3 3"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
 );
 import { api } from "./lib/api";
 import {
@@ -46,6 +68,8 @@ import {
   Film,
   PenTool,
   Send,
+  ArrowLeftRight,
+  RefreshCcw,
   RefreshCw,
   Lock,
 } from "lucide-react";
@@ -53,6 +77,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { createPortal } from "react-dom";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { hypersellQueue } from "./lib/concurrencyQueue";
 
 // --- Utility ---
 function cn(...inputs: ClassValue[]) {
@@ -313,6 +338,11 @@ interface Task {
   historySaved?: boolean;
   error?: string;
   createdAt: number;
+  startedAt?: number;
+  // For queued (or later-started) tasks we need to retain the file until execution.
+  // Note: persisted tasks from localStorage won't retain these File objects.
+  imageFile?: File;
+  videoFile?: File;
   aspectRatio?: string;
   duration?: string;
   params?: any; // Store original generation params
@@ -423,6 +453,19 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
     image: false,
     enhance: false,
   });
+  // Track short-lived submit/upload operations per tab so parallel submissions don't
+  // accidentally leave the UI stuck in "UPLOADING...".
+  const inflightRef = useRef<Record<"text" | "image" | "enhance", number>>({
+    text: 0,
+    image: 0,
+    enhance: 0,
+  });
+
+  const bumpInflight = (type: "text" | "image" | "enhance", delta: number) => {
+    inflightRef.current[type] = Math.max(0, (inflightRef.current[type] || 0) + delta);
+    const isLoading = inflightRef.current[type] > 0;
+    setLoadingByTab(prev => (prev[type] === isLoading ? prev : { ...prev, [type]: isLoading }));
+  };
   const [pollingByTab, setPollingByTab] = useState<Record<"text" | "image" | "enhance", boolean>>({
     text: false,
     image: false,
@@ -470,31 +513,50 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
 
   const PAGE_LIMITS = { text: 5, image: 5, enhance: 3 };
 
+  // Configure per-mode parallelism.
+  useEffect(() => {
+    hypersellQueue.setLimit("text", PAGE_LIMITS.text);
+    hypersellQueue.setLimit("image", PAGE_LIMITS.image);
+    hypersellQueue.setLimit("enhance", PAGE_LIMITS.enhance);
+  }, []);
+
   const canStartTask = (type: "text" | "image" | "enhance") => {
     const activeCount = tasks.filter(t => t.type === type && t.status === "running").length;
     return activeCount < PAGE_LIMITS[type];
   };
 
+  const runningCountByType = useMemo(() => {
+    return {
+      text: tasks.filter(t => t.type === "text" && t.status === "running").length,
+      image: tasks.filter(t => t.type === "image" && t.status === "running").length,
+      enhance: tasks.filter(t => t.type === "enhance" && t.status === "running").length,
+    };
+  }, [tasks]);
+
   useEffect(() => {
     localStorage.setItem("vgot:hypersell:tasks", JSON.stringify(tasks));
   }, [tasks]);
 
-  // Rehydrate polling for running tasks
+  // Rehydrate polling for running tasks.
+  // IMPORTANT: HyperSellView can be unmounted when navigating to other tabs.
+  // We re-run this whenever `tasks` changes so returning to HyperSell will resume polling.
   useEffect(() => {
-    tasks.forEach(t => {
+    tasks.forEach((t) => {
       if (t.status === "running" && t.apiTaskId) {
         startPolling(t.apiTaskId, t.type, t.id, {
           prompt: t.prompt,
           params: t.params,
           aspectRatio: t.aspectRatio || "9:16",
-          duration: t.duration || "10"
+          duration: t.duration || "10",
         });
       }
     });
+  }, [tasks]);
 
+  // Cleanup intervals when leaving HyperSell so re-entering can restart polling cleanly.
+  useEffect(() => {
     return () => {
-      // Cleanup all intervals on unmount
-      timersRef.current.forEach(timer => clearInterval(timer.intervalId));
+      timersRef.current.forEach((timer) => clearInterval(timer.intervalId));
       timersRef.current.clear();
     };
   }, []);
@@ -535,9 +597,10 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
         const res = await api.get(pollUrl);
         const data = res;
         const status = (data.status || data.state || data.data?.status || data.data?.state || "").toLowerCase();
-        const supabaseUrl = data.stored_url || data.supabase_url || data.data?.stored_url || data.data?.supabase_url;
-        const externalUrl = data.result_url || data.url || data.output || data.data?.url || data.data?.output || (data.results && data.results[0]?.url) || (data.data?.results && data.data?.results[0]?.url);
-        const finalUrl = supabaseUrl || externalUrl;
+  const supabaseUrl = data.stored_url || data.supabase_url || data.data?.stored_url || data.data?.supabase_url;
+  const externalUrl = data.result_url || data.url || data.output || data.data?.url || data.data?.output || (data.results && data.results[0]?.url) || (data.data?.results && data.data?.results[0]?.url);
+  const finalUrl = supabaseUrl || externalUrl;
+  const providerUrl = data.provider_url || data.file_url || data.result_url || data.data?.provider_url || data.data?.file_url || externalUrl;
 
         // Update progress if available
         const progressRaw = data.progress ?? data.data?.progress ?? data.result?.progress;
@@ -575,39 +638,126 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
 
           // Persist history (only for text/image, backend handles enhance)
           if (type !== "enhance") {
-            // Ensure idempotency: polling can hit success multiple times (e.g., if finalUrl is already present)
-            // so we guard to avoid creating duplicate history records.
+            // Ensure idempotency: polling can hit success multiple times.
+            // IMPORTANT: don't mark historySaved=true until the request actually succeeds.
             let shouldSave = false;
             setTasks(prev => {
               const t = prev.find(x => x.id === localId);
               if (t && !t.historySaved) shouldSave = true;
-              return prev.map(x => x.id === localId ? { ...x, historySaved: true } : x);
+              return prev;
             });
 
             if (shouldSave) {
               try {
-                api.post("/api/history/save", {
+                // Use explicit fetch so we can reliably attach token and surface HTTP status.
+                // (api.post throws on non-2xx, which can bypass chained .catch in some cases.)
+                const token = localStorage.getItem("access_token");
+                const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || "";
+                
+                // Debug logging for token and API base
+                console.log("🔍 HyperSell history save debug:", {
+                  hasToken: !!token,
+                  tokenLength: token?.length || 0,
+                  apiBase: API_BASE,
+                  taskType: type,
+                  localTaskId: localId
+                });
+                
+                const payload = {
                   content_type: "video",
+                  // Backend expects snake_case subtypes (see Vgot_front VideoGeneration.js)
                   content_subtype: type === "text" ? "text_to_video" : "image_to_video",
+                  // Keep this value stable; HistoryView badges and filters rely on exact match.
                   source_page: "HyperSell",
-                  file_data: finalUrl,
+                  // backend list reads file_url OR file_data; we send file_data and accept file_url back.
+                  file_data: supabaseUrl || providerUrl || finalUrl,
                   prompt: metadata.prompt || "",
-                  generation_params: metadata.params || {},
+                  generation_params: { ...(metadata.params || {}), provider_url: providerUrl || null },
                   api_endpoint: type === "text" ? "/api/sora/text-to-video" : "/api/sora/watermark-free",
                   api_response_data: data,
                   duration: Number(metadata.duration) || null,
                   dimensions: metadata.aspectRatio || null,
-                }).then(saved => {
-                  if (saved?.file_url) {
-                    setTasks(prev => prev.map(t => t.id === localId ? {
-                      ...t,
-                      supabaseUrl: saved.file_url,
-                      resultUrl: saved.file_url
-                    } : t));
-                  }
-                }).catch(e => console.warn("Failed to save to history", e));
+                };
+
+                console.log("📤 发送保存请求:", {
+                  url: `${API_BASE}/api/history/save`,
+                  payload: payload,
+                  hasAuthHeader: !!token
+                });
+
+                fetch(`${API_BASE}/api/history/save`, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                  },
+                  body: JSON.stringify(payload),
+                })
+                  .then(async (r) => {
+                    console.log("📥 保存响应:", {
+                      ok: r.ok,
+                      status: r.status,
+                      statusText: r.statusText
+                    });
+                    
+                    if (!r.ok) {
+                      const errText = await r.text().catch(() => "");
+                      const msg = errText || `HTTP ${r.status}`;
+                      console.error("❌ 保存失败详情:", { status: r.status, errText });
+                      // Surface on mobile instead of silent console.warn.
+                      alert(`保存到 History 失败：${msg}`);
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === localId ? { ...t, error: `History save failed: ${msg}` } : t,
+                        ),
+                      );
+                      return null;
+                    }
+                    const json = await r.json().catch(() => null);
+                    console.log("✅ 保存成功:", json);
+                    // Mark saved only after success
+                    setTasks((prev) => prev.map((t) => (t.id === localId ? { ...t, historySaved: true } : t)));
+                    // Refresh History list for immediate UX parity with enhance auto-save.
+                    console.log("🔄 触发历史记录刷新");
+                    try {
+                      (window as any).__vgot_refresh_history__?.();
+                    } catch {
+                      // ignore
+                    }
+                    return json;
+                  })
+                  .then((saved) => {
+                    if (saved?.file_url) {
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === localId
+                            ? {
+                                ...t,
+                                supabaseUrl: saved.file_url,
+                                resultUrl: saved.file_url,
+                              }
+                            : t,
+                        ),
+                      );
+                    }
+                  })
+                  .catch((e) => {
+                    const msg = e?.message || String(e || "Unknown error");
+                    alert(`保存到 History 失败：${msg}`);
+                    setTasks((prev) =>
+                      prev.map((t) =>
+                        t.id === localId ? { ...t, error: `History save failed: ${msg}` } : t,
+                      ),
+                    );
+                  });
               } catch (e) {
-                console.warn("Failed to save to history", e);
+                const msg = (e as any)?.message || String(e || "Unknown error");
+                alert(`保存到 History 失败：${msg}`);
+                setTasks((prev) =>
+                  prev.map((t) =>
+                    t.id === localId ? { ...t, error: `History save failed: ${msg}` } : t,
+                  ),
+                );
               }
             }
           }
@@ -664,13 +814,106 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
       }
       // only stop spinner for the task's own tab when its polling is done
       setPollingByTab(prev => ({ ...prev, [type]: false }));
-      setLoadingByTab(prev => ({ ...prev, [type]: false }));
     };
 
     const intervalId = setInterval(poll, 5000);
     timersRef.current.set(localId, { intervalId, startAt });
     poll(); // Initial kick
   };
+
+  const startTaskFromQueue = async (localId: string) => {
+    const t = tasks.find(x => x.id === localId);
+    if (!t) return;
+    if (t.status !== "queued") return;
+
+    // Flip to running immediately for UI.
+  setTasks(prev => prev.map(x => x.id === localId ? ({ ...x, status: "running", startedAt: Date.now() } as any) : x));
+  bumpInflight(t.type, +1);
+
+    try {
+      let res: any;
+
+      if (t.type === "text") {
+        res = await api.post("/api/sora/text-to-video", t.params);
+      } else if (t.type === "image") {
+        if (!t.imageFile) throw new Error("Missing image file");
+        // Step 1: Upload image to Supabase via proxy
+        const formData = new FormData();
+        formData.append("file", t.imageFile);
+        formData.append("folder", "images");
+        const uploadRes = await api.post("/api/supabase/upload", formData);
+        if (!uploadRes.success) throw new Error(uploadRes.error || "Upload failed");
+        const finalUrl = uploadRes.url;
+
+        // Step 2: Start image-to-video task
+        res = await api.post("/api/sora/watermark-free", {
+          ...t.params,
+          url: finalUrl,
+        });
+      } else {
+        if (!t.videoFile) throw new Error("Missing video file");
+        // Step 0: Check duration
+        const durationSec = await checkVideoDuration(t.videoFile);
+        if (durationSec === null || durationSec > 15.25) {
+          throw new Error("Video duration must be 15 seconds or less");
+        }
+
+        // Step 1: Upload file to RunningHub
+        const formData = new FormData();
+        formData.append("file", t.videoFile);
+        const upRes = await api.post("/api/enhance/upload", formData);
+        const fileName = upRes?.data?.file_name || upRes?.data?.fileName || upRes?.file_name;
+        if (!fileName) throw new Error("Upload failed: No file name returned");
+
+        // Step 2: Start enhance task
+        res = await api.post("/api/enhance/start", { file_name: fileName });
+      }
+
+      const apiId = res?.task_id || res?.id || res?.data?.task_id || res?.data?.id || res?.data?.taskId;
+      if (!apiId) throw new Error("Failed to get task ID");
+
+      setTasks(prev => prev.map(x => x.id === localId ? { ...x, apiTaskId: apiId } : x));
+      // Once we have an api task id, polling will take over; release uploading lock.
+      bumpInflight(t.type, -1);
+      await startPolling(apiId, t.type, localId, {
+        prompt: t.type === "enhance" ? "" : (t.prompt || ""),
+        params: t.params,
+        aspectRatio: t.aspectRatio || "9:16",
+        duration: t.duration || "10",
+      });
+    } catch (err: any) {
+      const errorMsg = err?.message || "An error occurred";
+      setError(errorMsg);
+      setTasks(prev => prev.map(x => x.id === localId ? { ...x, status: "failed", error: errorMsg } : x));
+      bumpInflight(t.type, -1);
+    }
+  };
+
+  const tryStartQueuedTasks = (type: "text" | "image" | "enhance") => {
+    const limit = PAGE_LIMITS[type];
+    const running = runningCountByType[type];
+    const slots = Math.max(0, limit - running);
+    if (!slots) return;
+
+    // Start up to available slots, FIFO by createdAt.
+    const queued = tasks
+      .filter(t => t.type === type && t.status === "queued")
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+      .slice(0, slots);
+
+    queued.forEach(t => {
+      startTaskFromQueue(t.id).catch(() => {
+        // handled in startTaskFromQueue
+      });
+    });
+  };
+
+  // Whenever tasks change, try to drain queues.
+  useEffect(() => {
+    tryStartQueuedTasks("text");
+    tryStartQueuedTasks("image");
+    tryStartQueuedTasks("enhance");
+  }, [tasks]);
 
   const handleGenerate = async () => {
     if (activeTab === "text" && !prompt.trim()) {
@@ -682,12 +925,16 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
       return;
     }
 
-    if (!canStartTask(activeTab)) {
-      alert(`最多同时运行 ${PAGE_LIMITS[activeTab]} 个任务`);
-      return;
+    const shouldQueue = !canStartTask(activeTab);
+
+    // For image/enhance: queued tasks can only run while this tab is open
+    // because File objects can't be restored from localStorage.
+    if (shouldQueue && (activeTab === "image" || activeTab === "enhance")) {
+      alert(`该模式最多并行 ${PAGE_LIMITS[activeTab]} 个任务。已达到上限时会排队，但请保持当前页面不刷新，否则排队中的文件会丢失。`);
     }
 
-  setLoadingByTab(prev => ({ ...prev, [activeTab]: true }));
+    // Only show "UPLOADING..." for the short submit/upload window, not while polling.
+    if (!shouldQueue) bumpInflight(activeTab, +1);
     setError(null);
 
     const localId = `${activeTab}-${Date.now()}`;
@@ -709,75 +956,85 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
       id: localId,
       type: activeTab,
       prompt: taskPrompt,
-      status: "running",
+      status: shouldQueue ? "queued" : "running",
       progress: 0,
       createdAt: Date.now(),
+      startedAt: shouldQueue ? undefined : Date.now(),
       aspectRatio,
       duration,
       params,
+      imageFile: activeTab === "image" ? uploadedFile! : undefined,
+      videoFile: activeTab === "enhance" ? uploadedFile! : undefined,
     };
     setTasks(prev => [newTask, ...prev]);
 
-    try {
-      let res;
-      if (activeTab === "text") {
-        res = await api.post("/api/sora/text-to-video", params);
-      } else if (activeTab === "image") {
-        // Step 1: Upload image to Supabase via proxy
-        const formData = new FormData();
-        formData.append("file", uploadedFile!);
-        formData.append("folder", "images");
-        const uploadRes = await api.post("/api/supabase/upload", formData);
-        if (!uploadRes.success) throw new Error(uploadRes.error || "Upload failed");
-        const finalUrl = uploadRes.url;
+    // If queued, stop here — scheduler will start it when a slot is free.
+    if (shouldQueue) return;
 
-        // Step 2: Start image-to-video task
-        res = await api.post("/api/sora/watermark-free", {
-          ...params,
-          url: finalUrl,
-        });
-      } else {
-        // Enhance
-        // Step 0: Check duration
-        const durationSec = await checkVideoDuration(uploadedFile!);
-        if (durationSec === null || durationSec > 15.25) {
-          alert("Video duration must be 15 seconds or less");
-          setLoadingByTab(prev => ({ ...prev, [activeTab]: false }));
-          setTasks(prev => prev.filter(t => t.id !== localId));
-          return;
+    try {
+      // Use queue to ensure we never exceed per-mode parallelism.
+      // Note: our own scheduler moves tasks from queued->running; this queue protects
+      // us from double-starts under rapid clicking.
+      const { promise } = hypersellQueue.enqueue(activeTab, async () => {
+        let res: any;
+        if (activeTab === "text") {
+          res = await api.post("/api/sora/text-to-video", params);
+        } else if (activeTab === "image") {
+          // Step 1: Upload image to Supabase via proxy
+          const formData = new FormData();
+          formData.append("file", uploadedFile!);
+          formData.append("folder", "images");
+          const uploadRes = await api.post("/api/supabase/upload", formData);
+          if (!uploadRes.success) throw new Error(uploadRes.error || "Upload failed");
+          const finalUrl = uploadRes.url;
+
+          // Step 2: Start image-to-video task
+          res = await api.post("/api/sora/watermark-free", {
+            ...params,
+            url: finalUrl,
+          });
+        } else {
+          // Enhance
+          // Step 0: Check duration
+          const durationSec = await checkVideoDuration(uploadedFile!);
+          if (durationSec === null || durationSec > 15.25) {
+            throw new Error("Video duration must be 15 seconds or less");
+          }
+
+          // Step 1: Upload file to RunningHub
+          const formData = new FormData();
+          formData.append("file", uploadedFile!);
+          const upRes = await api.post("/api/enhance/upload", formData);
+          const fileName = upRes?.data?.file_name || upRes?.data?.fileName || upRes?.file_name;
+
+          if (!fileName) throw new Error("Upload failed: No file name returned");
+
+          // Step 2: Start enhance task
+          res = await api.post("/api/enhance/start", {
+            file_name: fileName
+          });
         }
 
-        // Step 1: Upload file to RunningHub
-        const formData = new FormData();
-        formData.append("file", uploadedFile!);
-        const upRes = await api.post("/api/enhance/upload", formData);
-        const fileName = upRes?.data?.file_name || upRes?.data?.fileName || upRes?.file_name;
+        const apiId = res?.task_id || res?.id || res?.data?.task_id || res?.data?.id || res?.data?.taskId;
+        if (!apiId) throw new Error("Failed to get task ID");
+        return apiId;
+      });
 
-        if (!fileName) throw new Error("Upload failed: No file name returned");
-
-        // Step 2: Start enhance task
-        res = await api.post("/api/enhance/start", {
-          file_name: fileName
-        });
-      }
-
-      const apiId = res?.task_id || res?.id || res?.data?.task_id || res?.data?.id || res?.data?.taskId;
-      if (apiId) {
-        setTasks(prev => prev.map(t => t.id === localId ? { ...t, apiTaskId: apiId } : t));
-        startPolling(apiId, activeTab, localId, {
-          prompt,
-          params,
-          aspectRatio,
-          duration
-        });
-      } else {
-        throw new Error("Failed to get task ID");
-      }
+      const apiId = await promise;
+      setTasks(prev => prev.map(t => t.id === localId ? { ...t, apiTaskId: apiId } : t));
+      // Got taskId: release uploading lock so user can start another task.
+      bumpInflight(activeTab, -1);
+      startPolling(apiId, activeTab, localId, {
+        prompt,
+        params,
+        aspectRatio,
+        duration
+      });
     } catch (err: any) {
-      const errorMsg = err.message || "An error occurred";
+      const errorMsg = err?.message || "An error occurred";
       setError(errorMsg);
       setTasks(prev => prev.map(t => t.id === localId ? { ...t, status: "failed", error: errorMsg } : t));
-      setLoadingByTab(prev => ({ ...prev, [activeTab]: false }));
+      bumpInflight(activeTab, -1);
     }
   };
 
@@ -948,22 +1205,38 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
 
       {/* Action Button */}
       <div className="pt-4">
+        {(() => {
+          const runningCountForTab = tasks.filter(
+            (t) => t.type === activeTab && t.status === "running",
+          ).length;
+          const limitForTab = PAGE_LIMITS[activeTab];
+          const isAtCapacity = runningCountForTab >= limitForTab;
+          // "loading" is the short window where we are creating/uploading and haven't
+          // transitioned to polling yet. Polling should NOT block starting more tasks.
+          const isBusyStarting = loadingByTab[activeTab];
+          const isDisabled = isBusyStarting || isAtCapacity;
+
+          return (
         <NeonButton
           onClick={handleGenerate}
-          disabled={loadingByTab[activeTab] || pollingByTab[activeTab]}
+          disabled={isDisabled}
         >
-          {loadingByTab[activeTab] || pollingByTab[activeTab] ? (
+          {isBusyStarting ? (
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              {pollingByTab[activeTab] ? "Generating..." : "Uploading..."}
+              Uploading...
             </div>
           ) : (
             <>
               <Zap size={18} fill="currentColor" />
-              Generate Video
+              {isAtCapacity
+                ? `At capacity (${runningCountForTab}/${limitForTab})`
+                : `Generate Video (${runningCountForTab}/${limitForTab})`}
             </>
           )}
         </NeonButton>
+          );
+        })()}
       </div>
 
       {/* Recent Result */}
@@ -1013,6 +1286,7 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
 // 3. Super IP (Digital Human)
 const SuperIpView = () => {
   const [step, setStep] = useState(1);
+  const [isSendIconPink, setIsSendIconPink] = useState(false);
   const [isAudioSelected, setIsAudioSelected] = useState(false);
   const [selectedAudio, setSelectedAudio] = useState<any>(null);
   const audioUploadInputRef = useRef<HTMLInputElement>(null);
@@ -1027,13 +1301,115 @@ const SuperIpView = () => {
 
   // SuperIP Gen (Step 3)
   const SUPERIP_DEFAULT_DURATION_SEC = 10;
+
+  interface SuperIpTask {
+    internalId: string;
+    taskId?: string;
+    status: 'queued' | 'processing' | 'success' | 'failed';
+    type: 'com' | 'pro';
+    resultUrl?: string;
+    prompt?: string;
+    timestamp: number;
+    error?: string;
+  }
+
   const [superIpGenPrompt, setSuperIpGenPrompt] = useState<string>("");
-  const [isStartingSuperIpGen, setIsStartingSuperIpGen] = useState(false);
-  const [isPollingSuperIpGen, setIsPollingSuperIpGen] = useState(false);
-  const [superIpGenTaskId, setSuperIpGenTaskId] = useState<string>("");
+  const [superIpTasks, setSuperIpTasks] = useState<SuperIpTask[]>([]);
+  // superIpGenResultUrl is used for the "Displayed" video (e.g. clicked history item)
   const [superIpGenResultUrl, setSuperIpGenResultUrl] = useState<string | null>(null);
+  const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
   const [superIpGenError, setSuperIpGenError] = useState<string | null>(null);
   const [superIpVideoHistory, setSuperIpVideoHistory] = useState<any[]>([]);
+
+  // Auto-dismiss error after 3 seconds
+  useEffect(() => {
+    if (superIpGenError) {
+      const timer = setTimeout(() => {
+        setSuperIpGenError(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [superIpGenError]);
+
+  // Wavespeed Pro generation state (shares Result player with existing SuperIP Gen)
+  // const [isStartingWavespeedPro, setIsStartingWavespeedPro] = useState(false); // Removed in favor of superIpTasks
+
+  const WAVESPEED_DEFAULT_PROMPT = `Ultra-realistic live-action style. A professional  doctor in his late 50s, speaking confidently into a microphone. Medium close-up shot at eye level, with a softly blurred clean background. Lighting is natural and balanced, highlighting facial details.
+
+Performance: His expressions  and naturally, synchronized with his speech. He maintains steady eye contact with the camera most of the time, occasionally glancing slightly to the side as if recalling information, then returning focus. Natural blinking at irregular intervals. Eyebrows lift gently when emphasizing key points, narrow slightly when showing concern, and relax into a calm, reassuring look when offering solutions. Mouth movements are precise and clear, sometimes pressing lips briefly between phrases.
+
+Micro-expressions appear: faint smiles when delivering positive outcomes, slight head tilts showing thoughtfulness, and subtle nods reinforcing confidence. His torso shifts subtly to avoid stiffness, with a slight forward lean when stressing key insights, then returning to a relaxed upright position.
+
+Overall mood: calm, professional, trustworthy, and educational — like a medical expert giving a clear, approachable health lecture. All transitions between expressions, and movements are smooth and realistic, with no abrupt or robotic changes.`;
+
+  const looksLikeHttpUrl = (s: string) => /^https?:\/\//i.test(s);
+
+  const startWavespeedPro = async (opts: { source: 'send-icon' | 'gen-pro' }) => {
+    // Check concurrency limit (max 3 active tasks)
+    const activeCount = superIpTasks.filter(t => t.status === 'processing' || t.status === 'queued').length;
+    if (activeCount >= 3) {
+      alert("最多允许同时运行 3 个任务");
+      return;
+    }
+
+    setSuperIpGenError(null);
+
+    const imageUrl = (selectedCharacterImage && looksLikeHttpUrl(selectedCharacterImage)) ? selectedCharacterImage : null;
+    const audioUrl = (selectedAudioUrl && looksLikeHttpUrl(selectedAudioUrl)) ? selectedAudioUrl : null;
+
+    if (!imageUrl) {
+      alert('请先上传图片并拿到 URL');
+      return;
+    }
+    if (!audioUrl) {
+      alert('请先上传音频并拿到 URL');
+      return;
+    }
+
+    const promptValue = opts.source === 'send-icon'
+      ? WAVESPEED_DEFAULT_PROMPT
+      : (superIpGenPrompt || '').trim();
+
+    const internalId = `pro-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const newTask: SuperIpTask = {
+      internalId,
+      status: 'processing',
+      type: 'pro',
+      prompt: promptValue,
+      timestamp: Date.now(),
+    };
+
+    setSuperIpTasks(prev => [newTask, ...prev]);
+
+    try {
+      const durationSec = Math.max(1, Math.round(await getAudioDurationSeconds(audioUrl)));
+
+      const res = await api.post('/api/avatar/wavespeed-infinitetalk', {
+        audio: audioUrl,
+        image: imageUrl,
+        prompt: promptValue,
+        resolution: '480p',
+        seed: -1,
+        duration: durationSec,
+      });
+
+      const videoUrl = String(res?.video || '').trim();
+      if (!videoUrl) {
+        throw new Error('Wavespeed 未返回 video URL');
+      }
+
+      setSuperIpTasks(prev => prev.map(t => t.internalId === internalId ? { ...t, status: 'success', resultUrl: videoUrl } : t));
+      // If this is the latest task, update the main display
+      setSuperIpGenResultUrl(videoUrl);
+      loadSuperIpVideoHistory();
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      setSuperIpGenError(msg);
+      console.warn('Wavespeed Pro failed:', e);
+      alert(msg);
+      setSuperIpTasks(prev => prev.map(t => t.internalId === internalId ? { ...t, status: 'failed', error: msg } : t));
+    }
+  };
 
 
   // --- VOICE workbench (backend wired, aligned with desktop SuperIP) ---
@@ -1158,6 +1534,14 @@ const SuperIpView = () => {
     }
   };
 
+  // Ensure GEN step shows history immediately (not only after a new generation)
+  useEffect(() => {
+    if (step === 3) {
+      loadSuperIpVideoHistory();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
   const getAudioDurationSeconds = (urlOrDataUrl: string): Promise<number> => {
     return new Promise((resolve) => {
       try {
@@ -1240,11 +1624,14 @@ const SuperIpView = () => {
   };
 
   const startSuperIpGen = async (mode: 'default' | 'custom') => {
-    if (isStartingSuperIpGen || isPollingSuperIpGen) return;
+    // Check concurrency limit (max 3 active tasks)
+    const activeCount = superIpTasks.filter(t => t.status === 'processing' || t.status === 'queued').length;
+    if (activeCount >= 3) {
+      alert("最多允许同时运行 3 个任务");
+      return;
+    }
 
     setSuperIpGenError(null);
-    setSuperIpGenResultUrl(null);
-    setSuperIpGenTaskId('');
 
     if (!selectedCharacterImage && !characterImageBase64) {
       alert('请先选择/生成角色图片');
@@ -1255,7 +1642,17 @@ const SuperIpView = () => {
       return;
     }
 
-    setIsStartingSuperIpGen(true);
+    const internalId = `com-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const newTask: SuperIpTask = {
+      internalId,
+      status: 'processing',
+      type: 'com',
+      prompt: (superIpGenPrompt || '').trim(),
+      timestamp: Date.now(),
+    };
+
+    setSuperIpTasks(prev => [newTask, ...prev]);
+
     try {
       // Vgot_front behavior: SuperIP video gen ultimately wants RunningHub fileName.
       // - Image: prefer existing RunningHub fileName; fallback to uploading current selection (file/dataUrl) to RH.
@@ -1339,10 +1736,10 @@ const SuperIpView = () => {
       if (!taskId) {
         throw new Error('后端未返回 task_id');
       }
-      setSuperIpGenTaskId(taskId);
+      
+      setSuperIpTasks(prev => prev.map(t => t.internalId === internalId ? { ...t, taskId } : t));
 
       // 4) Poll outputs
-      setIsPollingSuperIpGen(true);
       const POLL_MS = 2500;
       const MAX_TRIES = 240; // ~10 minutes
       for (let i = 0; i < MAX_TRIES; i++) {
@@ -1350,11 +1747,14 @@ const SuperIpView = () => {
         if (out?.status === 'success') {
           const finalUrl = out?.stored_url || out?.file_url;
           if (finalUrl) {
+            setSuperIpTasks(prev => prev.map(t => t.internalId === internalId ? { ...t, status: 'success', resultUrl: String(finalUrl) } : t));
             setSuperIpGenResultUrl(String(finalUrl));
           }
           // backend already saves history in outputs; refresh mini history
           loadSuperIpVideoHistory();
           break;
+        } else if (out?.status === 'failed') {
+           throw new Error(out?.error || 'Generation failed');
         }
         // running
         await new Promise((r) => setTimeout(r, POLL_MS));
@@ -1364,15 +1764,13 @@ const SuperIpView = () => {
       setSuperIpGenError(msg);
       console.warn('SuperIP Gen failed:', e);
       alert(msg);
-    } finally {
-      setIsStartingSuperIpGen(false);
-      setIsPollingSuperIpGen(false);
+      setSuperIpTasks(prev => prev.map(t => t.internalId === internalId ? { ...t, status: 'failed', error: msg } : t));
     }
   };
 
   const clearSuperIpGen = () => {
     setSuperIpGenPrompt('');
-    setSuperIpGenTaskId('');
+    // setSuperIpGenTaskId(''); // Removed
     setSuperIpGenResultUrl(null);
     setSuperIpGenError(null);
   };
@@ -2423,9 +2821,8 @@ const SuperIpView = () => {
             );
           })}
         </div>
-      </div>
 
-      {/* Progress Circuit removed */}
+      </div>
 
       {/* Step Content */}
       <div className="flex-1 flex flex-col overflow-y-auto overflow-x-hidden min-h-0 pr-1">
@@ -2514,23 +2911,107 @@ const SuperIpView = () => {
 
                 <div className="flex-1 min-w-0" />
 
-                <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
-                  <Film
-                    size={18}
-                    className="text-slate-600 group-hover:text-cyan-400 transition-colors"
-                  />
-                  <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
-                    视频生成
-                  </span>
+                {/* Upload Box 3 - Video */}
+                <div 
+                  className="w-16 flex flex-col items-center justify-center gap-1 p-1 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16 relative overflow-hidden"
+                  onClick={() => {
+                    if (superIpGenResultUrl) {
+                      setPreviewVideoUrl(superIpGenResultUrl);
+                    }
+                  }}
+                >
+                  {(superIpTasks[0]?.status === 'processing') ? (
+                    <div className="flex flex-col items-center justify-center w-full h-full">
+                      <div
+                        className="shrink-0 rounded-full animate-spin"
+                        style={{
+                          width: '18px',
+                          height: '18px',
+                          borderWidth: 2,
+                          borderStyle: 'solid',
+                          borderColor: 'rgba(34, 211, 238, 0.3)',
+                          borderTopColor: '#22d3ee',
+                          borderRightColor: 'rgba(34, 211, 238, 0.8)',
+                          filter: 'drop-shadow(0 0 6px rgba(34, 211, 238, 0.6))',
+                          animation: 'spin 0.8s linear infinite',
+                        }}
+                        aria-label="Generating"
+                      />
+                      <span className="mt-1 text-[9px] text-cyan-300 font-semibold text-center leading-tight whitespace-nowrap scale-90 origin-top">
+                        生成中
+                      </span>
+                    </div>
+                  ) : superIpGenResultUrl ? (
+                    <>
+                      <video
+                        src={superIpGenResultUrl}
+                        className="w-full h-full object-cover rounded-md"
+                        muted
+                        playsInline
+                        onMouseOver={(e) => e.currentTarget.play()}
+                        onMouseOut={(e) => e.currentTarget.pause()}
+                      />
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSuperIpGenResultUrl(null);
+                        }}
+                        className="absolute top-0 right-0 translate-x-1/4 -translate-y-1/4 z-30 px-1 text-white text-sm leading-none hover:text-slate-200 transition"
+                        style={{ textShadow: "0 0 6px rgba(0,0,0,0.75)" }}
+                        title="Clear video"
+                      >
+                        ×
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <Film size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
+                      <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
+                        视频生成
+                      </span>
+                    </>
+                  )}
                 </div>
 
-                <button
-                  className="text-cyan-400 hover:text-cyan-300 transition-all p-1"
-                  type="button"
-                  aria-label="Send"
-                >
-                  <Send size={24} />
-                </button>
+                <div className="flex flex-col items-center">
+                  <button
+                    type="button"
+                    onClick={() => startSuperIpGen('default')}
+                    disabled={superIpTasks[0]?.status === 'processing'}
+                    className={cn(
+                      "transition-all p-1",
+                      !isSendIconPink && "text-cyan-400 hover:text-cyan-300",
+                      (superIpTasks[0]?.status === 'processing') && "opacity-50 cursor-not-allowed",
+                    )}
+                    aria-label="Send(default)"
+                    title="Send (default)"
+                  >
+                    <Send
+                      size={24}
+                      color={isSendIconPink ? "#A10B6A" : undefined}
+                      className={cn(
+                        "transition-colors",
+                        isSendIconPink && "hover:text-[#C0127E]" 
+                      )}
+                    />
+                  </button>
+
+                  {/* Switch + Pro: directly under the Send (paper-plane) icon */}
+                  <button
+                    onClick={() => {
+                      setIsSendIconPink((v) => !v);
+                    }}
+                    className="mt-1 h-6 px-1 flex flex-row items-center justify-center gap-1 whitespace-nowrap text-slate-400 hover:text-cyan-400 transition-colors"
+                    type="button"
+                    aria-label="Switch Step"
+                    title="Switch Step"
+                  >
+                    <SwitchIcon size={12} className="shrink-0" />
+                    <span className="text-[10px] leading-none font-semibold">
+                      {isSendIconPink ? "Com" : "Pro"}
+                    </span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -2711,27 +3192,107 @@ const SuperIpView = () => {
                 <div className="flex-1 min-w-0" />
 
                 {/* Upload Box 3 - Video */}
-                <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
-                  <Film size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
-                  <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
-                    视频生成
-                  </span>
+                <div 
+                  className="w-16 flex flex-col items-center justify-center gap-1 p-1 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16 relative overflow-hidden"
+                  onClick={() => {
+                    if (superIpGenResultUrl) {
+                      setPreviewVideoUrl(superIpGenResultUrl);
+                    }
+                  }}
+                >
+                  {(superIpTasks[0]?.status === 'processing') ? (
+                    <div className="flex flex-col items-center justify-center w-full h-full">
+                      <div
+                        className="shrink-0 rounded-full animate-spin"
+                        style={{
+                          width: '18px',
+                          height: '18px',
+                          borderWidth: 2,
+                          borderStyle: 'solid',
+                          borderColor: 'rgba(34, 211, 238, 0.3)',
+                          borderTopColor: '#22d3ee',
+                          borderRightColor: 'rgba(34, 211, 238, 0.8)',
+                          filter: 'drop-shadow(0 0 6px rgba(34, 211, 238, 0.6))',
+                          animation: 'spin 0.8s linear infinite',
+                        }}
+                        aria-label="Generating"
+                      />
+                      <span className="mt-1 text-[9px] text-cyan-300 font-semibold text-center leading-tight whitespace-nowrap scale-90 origin-top">
+                        生成中
+                      </span>
+                    </div>
+                  ) : superIpGenResultUrl ? (
+                    <>
+                      <video
+                        src={superIpGenResultUrl}
+                        className="w-full h-full object-cover rounded-md"
+                        muted
+                        playsInline
+                        onMouseOver={(e) => e.currentTarget.play()}
+                        onMouseOut={(e) => e.currentTarget.pause()}
+                      />
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSuperIpGenResultUrl(null);
+                        }}
+                        className="absolute top-0 right-0 translate-x-1/4 -translate-y-1/4 z-30 px-1 text-white text-sm leading-none hover:text-slate-200 transition"
+                        style={{ textShadow: "0 0 6px rgba(0,0,0,0.75)" }}
+                        title="Clear video"
+                      >
+                        ×
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <Film size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
+                      <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
+                        视频生成
+                      </span>
+                    </>
+                  )}
                 </div>
 
-                {/* Send Icon Button */}
-                <button
-                  type="button"
-                  onClick={() => startSuperIpGen('default')}
-                  disabled={isStartingSuperIpGen || isPollingSuperIpGen}
-                  className={cn(
-                    "text-cyan-400 hover:text-cyan-300 transition-all p-1",
-                    (isStartingSuperIpGen || isPollingSuperIpGen) && "opacity-50 cursor-not-allowed",
-                  )}
-                  aria-label="Send(default)"
-                  title="Send (default)"
-                >
-                  <Send size={24} />
-                </button>
+                <div className="flex flex-col items-center">
+                  {/* Send Icon Button */}
+                  <button
+                    type="button"
+                    onClick={() => startSuperIpGen('default')}
+                    disabled={superIpTasks[0]?.status === 'processing'}
+                    className={cn(
+                      "transition-all p-1",
+                      !isSendIconPink && "text-cyan-400 hover:text-cyan-300",
+                      (superIpTasks[0]?.status === 'processing') && "opacity-50 cursor-not-allowed",
+                    )}
+                    aria-label="Send(default)"
+                    title="Send (default)"
+                  >
+                    <Send
+                      size={24}
+                      color={isSendIconPink ? "#A10B6A" : undefined}
+                      className={cn(
+                        "transition-colors",
+                        isSendIconPink && "hover:text-[#C0127E]",
+                      )}
+                    />
+                  </button>
+
+                  {/* Switch + Pro/Com (match CHAR behavior) */}
+                  <button
+                    onClick={() => {
+                      setIsSendIconPink((v) => !v);
+                    }}
+                    className="mt-1 h-6 px-1 flex flex-row items-center justify-center gap-1 whitespace-nowrap text-slate-400 hover:text-cyan-400 transition-colors"
+                    type="button"
+                    aria-label="Switch"
+                    title="Switch"
+                  >
+                    <SwitchIcon size={12} className="shrink-0" />
+                    <span className="text-[10px] leading-none font-semibold">
+                      {isSendIconPink ? "Com" : "Pro"}
+                    </span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -3352,17 +3913,107 @@ const SuperIpView = () => {
                 <div className="flex-1 min-w-0" />
 
                 {/* Upload Box 3 - Video */}
-                <div className="w-16 flex flex-col items-center justify-center gap-1.5 p-2 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16">
-                  <Film size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
-                  <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
-                    视频生成
-                  </span>
+                <div 
+                  className="w-16 flex flex-col items-center justify-center gap-1 p-1 border-2 border-dashed border-slate-700 rounded-lg bg-slate-950/30 hover:border-cyan-500/50 transition-all cursor-pointer group h-16 relative overflow-hidden"
+                  onClick={() => {
+                    if (superIpGenResultUrl) {
+                      setPreviewVideoUrl(superIpGenResultUrl);
+                    }
+                  }}
+                >
+                  {(superIpTasks[0]?.status === 'processing') ? (
+                    <div className="flex flex-col items-center justify-center w-full h-full">
+                      <div
+                        className="shrink-0 rounded-full animate-spin"
+                        style={{
+                          width: '18px',
+                          height: '18px',
+                          borderWidth: 2,
+                          borderStyle: 'solid',
+                          borderColor: 'rgba(34, 211, 238, 0.3)',
+                          borderTopColor: '#22d3ee',
+                          borderRightColor: 'rgba(34, 211, 238, 0.8)',
+                          filter: 'drop-shadow(0 0 6px rgba(34, 211, 238, 0.6))',
+                          animation: 'spin 0.8s linear infinite',
+                        }}
+                        aria-label="Generating"
+                      />
+                      <span className="mt-1 text-[9px] text-cyan-300 font-semibold text-center leading-tight whitespace-nowrap scale-90 origin-top">
+                        生成中
+                      </span>
+                    </div>
+                  ) : superIpGenResultUrl ? (
+                    <>
+                      <video
+                        src={superIpGenResultUrl}
+                        className="w-full h-full object-cover rounded-md"
+                        muted
+                        playsInline
+                        onMouseOver={(e) => e.currentTarget.play()}
+                        onMouseOut={(e) => e.currentTarget.pause()}
+                      />
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSuperIpGenResultUrl(null);
+                        }}
+                        className="absolute top-0 right-0 translate-x-1/4 -translate-y-1/4 z-30 px-1 text-white text-sm leading-none hover:text-slate-200 transition"
+                        style={{ textShadow: "0 0 6px rgba(0,0,0,0.75)" }}
+                        title="Clear video"
+                      >
+                        ×
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <Film size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
+                      <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
+                        视频生成
+                      </span>
+                    </>
+                  )}
                 </div>
 
-                {/* Send Icon Button */}
-                <button className="text-cyan-400 hover:text-cyan-300 transition-all p-1">
-                  <Send size={24} />
-                </button>
+                {/* Send Icon Button + Switch (match CHAR behavior) */}
+                <div className="flex flex-col items-center">
+                  <button
+                    className={cn(
+                      "transition-all p-1",
+                      !isSendIconPink && "text-cyan-400 hover:text-cyan-300",
+                    )}
+                    type="button"
+                    aria-label="Send"
+                    onClick={() => {
+                      // Pink => Pro line (Wavespeed). Cyan => Com line (RunningHub).
+                      if (isSendIconPink) startWavespeedPro({ source: "send-icon" });
+                      else startSuperIpGen("custom");
+                    }}
+                  >
+                    <Send
+                      size={24}
+                      color={isSendIconPink ? "#A10B6A" : undefined}
+                      className={cn(
+                        "transition-colors",
+                        isSendIconPink && "hover:text-[#C0127E]",
+                      )}
+                    />
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setIsSendIconPink((v) => !v);
+                    }}
+                    className="mt-1 h-6 px-1 flex flex-row items-center justify-center gap-1 whitespace-nowrap text-slate-400 hover:text-cyan-400 transition-colors"
+                    type="button"
+                    aria-label="Switch"
+                    title="Switch"
+                  >
+                    <SwitchIcon size={12} className="shrink-0" />
+                    <span className="text-[10px] leading-none font-semibold">
+                      {isSendIconPink ? "Pro" : "Com"}
+                    </span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -3380,11 +4031,7 @@ const SuperIpView = () => {
                 />
               </div>
 
-              {(isStartingSuperIpGen || isPollingSuperIpGen) && (
-                <div className="text-[10px] text-slate-400">
-                  {isStartingSuperIpGen ? '启动中…' : '生成中…'} {superIpGenTaskId ? `(task: ${superIpGenTaskId})` : ''}
-                </div>
-              )}
+
               {superIpGenError && (
                 <div className="text-[10px] text-red-400">
                   {superIpGenError}
@@ -3398,14 +4045,82 @@ const SuperIpView = () => {
                 >
                   Clear
                 </button>
-                <NeonButton
-                  className="flex-[2] py-2 text-[10px]"
-                  variant="primary"
-                  disabled={isStartingSuperIpGen || isPollingSuperIpGen}
-                  onClick={() => startSuperIpGen('custom')}
-                >
-                  <Zap size={14} /> Generate
-                </NeonButton>
+                {/* Diagonally split action button: Left=Generate (Main), Right=Pro (Option) */}
+                <div className="flex-[2] flex h-10 relative bg-transparent">
+                  {/* Left: Generate */}
+                  <button
+                    type="button"
+                    disabled={superIpTasks[0]?.status === 'processing'}
+                    onClick={() => startSuperIpGen('custom')}
+                    className={cn(
+                      "flex-1 bg-slate-950/90 hover:bg-slate-800 transition-colors relative z-10",
+                      "border border-cyan-500/50 border-r-0 rounded-l-lg", // Standard rounded corners
+                      "text-cyan-400 text-[10px] font-bold uppercase tracking-wider",
+                      "flex items-center justify-center gap-2 pr-3",
+                      (superIpTasks[0]?.status === 'processing') && "opacity-50 cursor-not-allowed"
+                    )}
+                    style={{ 
+                      clipPath: "polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0 100%)",
+                      borderTopLeftRadius: "0.5rem", // 8px
+                      borderBottomLeftRadius: "0.5rem"
+                    }}
+                  >
+                    <Zap size={14} className="text-cyan-400" />
+                    Generate
+                  </button>
+
+                  {/* Gap Borders (Blue Lines) - Single skewed div with side borders */}
+                  <div 
+                    className="absolute top-0 bottom-0 right-[84px] w-[12px] z-20 pointer-events-none border-x border-cyan-400 drop-shadow-[0_0_2px_rgba(34,211,238,0.8)] origin-top"
+                    style={{ transform: "skewX(-16.7deg)" }}
+                  />
+
+                  {/* Right: Pro */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      startWavespeedPro({ source: 'gen-pro' });
+                    }}
+                    className={cn(
+                      "w-24 bg-slate-950/90 hover:bg-slate-800 transition-colors relative z-10 shrink-0",
+                      "border border-cyan-500/50 border-l-0 rounded-r-lg", // Standard rounded corners
+                      "text-[#A10B6A] text-[10px] font-bold uppercase tracking-wider",
+                      "flex items-center justify-center pl-4"
+                    )}
+                    style={{ 
+                      clipPath: "polygon(12px 0, 100% 0, 100% 100%, 0 100%)",
+                      borderTopRightRadius: "0.5rem", // 8px
+                      borderBottomRightRadius: "0.5rem"
+                    }}
+                  >
+                    Pro
+                  </button>
+
+                  {/* SVG Overlay for Perfect Borders - Z-50 ensures visibility */}
+                  <svg 
+                    className="absolute top-0 right-0 h-full w-[128px] pointer-events-none z-50 drop-shadow-[0_0_2px_rgba(34,211,238,0.8)]" 
+                    viewBox="0 0 128 40" 
+                    fill="none" 
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    {/* 
+                      Geometry Calculation:
+                      Pro Button Width: 96px (w-24)
+                      SVG Width: 128px
+                      Seam Start X (Right aligned): 128 - 96 = 32px
+                      
+                      Generate Button Right Edge (Left Line):
+                      Top: At Seam (x=32)
+                      Bottom: Seam - 12px (x=20)
+                      
+                      Pro Button Left Edge (Right Line):
+                      Top: Seam + 12px (x=44)
+                      Bottom: At Seam (x=32)
+                    */}
+                    <line x1="32" y1="0" x2="20" y2="40" stroke="#22d3ee" strokeWidth="1.5" strokeLinecap="round" />
+                    <line x1="44" y1="0" x2="32" y2="40" stroke="#22d3ee" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </div>
               </div>
             </div>
 
@@ -3419,6 +4134,10 @@ const SuperIpView = () => {
                     playsInline
                     className="w-full h-full rounded-lg object-cover border border-slate-800 bg-black/50"
                   />
+                </div>
+              ) : (superIpTasks[0]?.status === 'processing') ? (
+                <div className="absolute inset-0 w-full h-full flex items-center justify-center z-10 bg-slate-900/80 backdrop-blur-sm">
+                  <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">Generating...</span>
                 </div>
               ) : (
                 <>
@@ -3438,7 +4157,40 @@ const SuperIpView = () => {
                 History
               </span>
               <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-                {(superIpVideoHistory?.length ? superIpVideoHistory : []).map((item: any, idx: number) => {
+                {/* Render active tasks (excluding the very first one which is in main view) */}
+                {superIpTasks.slice(1).map((task) => (
+                  <button
+                    key={task.internalId}
+                    type="button"
+                    onClick={() => {
+                      if (task.resultUrl) setSuperIpGenResultUrl(task.resultUrl);
+                    }}
+                    className="w-24 h-16 rounded-lg bg-slate-800 shrink-0 border border-slate-700 overflow-hidden relative group flex items-center justify-center"
+                    title={task.status === 'processing' ? "Generating..." : "Open"}
+                  >
+                    {task.status === 'processing' ? (
+                      <div className="flex flex-col items-center justify-center">
+                        <div className="w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin mb-1" />
+                        <span className="text-[8px] text-cyan-400">Generating</span>
+                      </div>
+                    ) : task.resultUrl ? (
+                      <video
+                        src={task.resultUrl}
+                        className="w-full h-full object-cover"
+                        muted
+                        playsInline
+                        onMouseOver={(e) => e.currentTarget.play()}
+                        onMouseOut={(e) => e.currentTarget.pause()}
+                      />
+                    ) : (
+                      <div className="text-[9px] text-red-400">Failed</div>
+                    )}
+                  </button>
+                ))}
+
+                {(superIpVideoHistory?.length ? superIpVideoHistory : [])
+                  .filter((h: any) => !superIpTasks.some(t => t.taskId && (t.taskId === h.task_id || t.taskId === h.taskId)))
+                  .map((item: any, idx: number) => {
                   const thumb = item?.file_url || item?.stored_url || item?.file_data || item?.url;
                   return (
                     <button
@@ -3450,9 +4202,20 @@ const SuperIpView = () => {
                       className="w-24 h-16 rounded-lg bg-slate-800 shrink-0 border border-slate-700 overflow-hidden relative group"
                       title="打开"
                     >
-                      <div className="w-full h-full flex items-center justify-center text-[9px] text-slate-400">
-                        video
-                      </div>
+                      {thumb ? (
+                        <video
+                          src={thumb}
+                          className="w-full h-full object-cover"
+                          muted
+                          playsInline
+                          onMouseOver={(e) => e.currentTarget.play()}
+                          onMouseOut={(e) => e.currentTarget.pause()}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-[9px] text-slate-400">
+                          video
+                        </div>
+                      )}
                     </button>
                   );
                 })}
@@ -4180,13 +4943,23 @@ const HistoryView = () => {
   const fetchHistory = async (filter: "all" | HistoryContentType) => {
     setLoadingHistory(true);
     try {
-      const token = localStorage.getItem("access_token") || localStorage.getItem("token");
+  const token = localStorage.getItem("access_token");
       const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || "";
+
+      console.log("🔍 History fetch debug:", {
+        filter,
+        hasToken: !!token,
+        tokenLength: token?.length || 0,
+        apiBase: API_BASE
+      });
 
       const params = new URLSearchParams({ limit: "100" });
       if (filter !== "all") params.append("content_type", filter);
 
-      const resp = await fetch(`${API_BASE}/api/history/list?${params.toString()}`,
+      const url = `${API_BASE}/api/history/list?${params.toString()}`;
+      console.log("📤 获取历史记录:", url);
+
+      const resp = await fetch(url,
         {
           method: "GET",
           headers: {
@@ -4196,6 +4969,12 @@ const HistoryView = () => {
         },
       );
 
+      console.log("📥 历史记录响应:", {
+        ok: resp.ok,
+        status: resp.status,
+        statusText: resp.statusText
+      });
+
       if (!resp.ok) {
         const errText = await resp.text().catch(() => "");
         console.warn("❌ 加载历史失败:", resp.status, errText);
@@ -4204,6 +4983,11 @@ const HistoryView = () => {
       }
 
       const data = await resp.json();
+      console.log("✅ 历史记录数据:", {
+        total: Array.isArray(data) ? data.length : 0,
+        hypersellCount: Array.isArray(data) ? data.filter(r => r.source_page === "HyperSell").length : 0,
+        videoCount: Array.isArray(data) ? data.filter(r => r.content_type === "video").length : 0
+      });
       setHistoryRecords(Array.isArray(data) ? data : []);
     } catch (e) {
       console.warn("❌ 加载历史失败:", e);
@@ -4215,6 +4999,26 @@ const HistoryView = () => {
 
   useEffect(() => {
     fetchHistory(activeFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFilter]);
+
+  // Allow other views (e.g., HyperSell) to trigger a History refresh after saving.
+  // This is a frontend-only way to mimic Enhance's "appears immediately" behavior.
+  useEffect(() => {
+    (window as any).__vgot_refresh_history__ = () => {
+      try {
+        fetchHistory(activeFilter);
+      } catch {
+        // ignore
+      }
+    };
+    return () => {
+      try {
+        delete (window as any).__vgot_refresh_history__;
+      } catch {
+        // ignore
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFilter]);
 
@@ -4309,7 +5113,7 @@ const HistoryView = () => {
               record.source_page === "HyperSell"
                 ? "border-purple-500/30 text-purple-400 bg-purple-500/10"
                 : "border-cyan-500/30 text-cyan-400 bg-cyan-500/10";
-            const badgeText = record.source_page === "HyperSell" ? "HyperSell" : "Super IP";
+            const badgeText = record.source_page === "HyperSell" ? "HYPERSELL" : "SUPER IP";
 
             return (
               <GlassCard
@@ -6053,61 +6857,6 @@ const BillingPlansView = ({
       setLoadingPlan(null);
     }
   };
-
-  const startCreditTopup = async (pack: "10" | "50" | "100") => {
-    if (!token) {
-      alert("请先登录后再充值");
-      return;
-    }
-
-    const productMap: Record<"10" | "50" | "100", string | undefined> = {
-      "10": import.meta.env.VITE_STRIPE_PRODUCT_CREDITS_10,
-      "50": import.meta.env.VITE_STRIPE_PRODUCT_CREDITS_50,
-      "100": import.meta.env.VITE_STRIPE_PRODUCT_CREDITS_100,
-    };
-    const productId = productMap[pack];
-    if (!productId) {
-      alert(
-        "缺少积分充值的 Stripe Product 配置（VITE_STRIPE_PRODUCT_CREDITS_10/50/100）",
-      );
-      return;
-    }
-
-    try {
-      setLoadingPlan(`credits:${pack}`);
-      const res = await fetch(
-        `${apiBase}/api/payments/create-checkout-session-by-product`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            product_id: productId,
-            quantity: 1,
-            currency: "usd",
-          }),
-        },
-      );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        alert(data?.detail || "创建支付会话失败");
-        return;
-      }
-      const url = data?.url;
-      if (!url) {
-        alert("未返回 url");
-        return;
-      }
-      window.location.href = url;
-    } catch (e: any) {
-      console.error(e);
-      alert(e?.message || "网络错误");
-    } finally {
-      setLoadingPlan(null);
-    }
-  };
   type PlanId = "free" | "creator" | "business" | "enterprise";
 
   type FeatureKind = "ok" | "partial" | "locked";
@@ -6851,7 +7600,9 @@ export default function App() {
           )}
           {activeTab === "scripts" && <ScriptsView />}
           {activeTab === "hypersell" && <HyperSellView onRefreshUser={fetchUser} />}
-          {activeTab === "superip" && <SuperIpView />}
+          <div style={{ display: activeTab === "superip" ? 'block' : 'none' }} className="h-full">
+            <SuperIpView />
+          </div>
           {activeTab === "history" && <HistoryView />}
           {activeTab === "login" && (
             <div className="space-y-6 pb-24">

@@ -23,11 +23,10 @@ async function request<T=any>(url: string, opts: RequestInit = {}): Promise<T> {
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const resp = await fetch(`${BASE}${url}`, { ...opts, headers });
-  if (resp.status === 401) {
-    // Auto logout on 401
-    try { localStorage.removeItem('access_token'); } catch {}
-    // Optionally, notify caller
-  }
+  // NOTE: Do not auto-delete tokens on 401.
+  // A 401 can be caused by temporary backend issues, clock skew, CORS/proxy differences,
+  // or an endpoint that doesn't accept the token format. Deleting the token here makes
+  // debugging much harder and can create a permanent 401 loop.
   const contentType = resp.headers.get('content-type') || '';
   const isJson = contentType.includes('application/json');
   const data = isJson ? await resp.json() : (await resp.text() as any);
