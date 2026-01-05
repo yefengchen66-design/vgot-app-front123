@@ -423,7 +423,19 @@ const TaskCard = ({ task, setTasks }: { task: Task, setTasks: React.Dispatch<Rea
   );
 };
 
-const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
+const HyperSellView = ({
+  user,
+  isLoggedIn,
+  onUnauthorized,
+  onNavigate,
+  onRefreshUser,
+}: {
+  user: UserProfile | null;
+  isLoggedIn: boolean;
+  onUnauthorized: () => void;
+  onNavigate: (tab: string) => void;
+  onRefreshUser?: () => void;
+}) => {
   const [activeTab, setActiveTab] = useState<"text" | "image" | "enhance">("text");
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -513,6 +525,31 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
 
   const PAGE_LIMITS = { text: 5, image: 5, enhance: 3 };
 
+  // Mirror desktop credit display logic (VideoGeneration.js)
+  const getCreditCost = (type: "text" | "image" | "enhance") => {
+    const tier = String(user?.tier || "");
+    const costs: Record<string, any> = {
+      text: { Free: 150, Creator: 150, Business: 150, Enterprise: 0 },
+      image: { Free: 150, Creator: 150, Business: 150, Enterprise: 0 },
+      // Enhance: Free not supported; Creator/Business priced; Enterprise free
+      enhance: { Free: -1, Creator: 800, Business: 500, Enterprise: 0 },
+    };
+    const c = costs[type]?.[tier];
+    return typeof c === "number" ? c : undefined;
+  };
+
+  const creditCost = getCreditCost(activeTab);
+  const creditsBalance = typeof user?.credits === "number" ? user.credits : 0;
+  const isEnhanceUnsupported = activeTab === "enhance" && creditCost === -1;
+  const isInsufficientCredits =
+    typeof creditCost === "number" && creditCost > 0 && creditsBalance < creditCost;
+
+  const requireAuthOrRedirect = () => {
+    if (isLoggedIn) return true;
+    onNavigate("login");
+    return false;
+  };
+
   // Configure per-mode parallelism.
   useEffect(() => {
     hypersellQueue.setLimit("text", PAGE_LIMITS.text);
@@ -594,6 +631,10 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
 
     const poll = async () => {
       try {
+        if (!requireAuthOrRedirect()) {
+          stopPolling();
+          return;
+        }
         const res = await api.get(pollUrl);
         const data = res;
         const status = (data.status || data.state || data.data?.status || data.data?.state || "").toLowerCase();
@@ -799,6 +840,12 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
         }
       } catch (err: any) {
         console.error("Polling error:", err);
+        const msg = String(err?.message || "");
+        if (msg.includes("401")) {
+          onUnauthorized();
+          stopPolling();
+          return;
+        }
         if (Date.now() - startAt > MAX_POLL_MS) {
           setTasks(prev => prev.map(t => t.id === localId ? { ...t, status: "failed", error: "Polling failed" } : t));
           stopPolling();
@@ -825,6 +872,23 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
     const t = tasks.find(x => x.id === localId);
     if (!t) return;
     if (t.status !== "queued") return;
+
+    if (!requireAuthOrRedirect()) {
+      setTasks(prev => prev.map(x => x.id === localId ? { ...x, status: "failed", error: "Please login" } : x));
+      return;
+    }
+
+    // Credits gating for queued tasks too
+    const queuedCost = getCreditCost(t.type);
+    const curCredits = typeof user?.credits === "number" ? user.credits : 0;
+    if (t.type === "enhance" && queuedCost === -1) {
+      setTasks(prev => prev.map(x => x.id === localId ? { ...x, status: "failed", error: "Not supported" } : x));
+      return;
+    }
+    if (typeof queuedCost === "number" && queuedCost > 0 && curCredits < queuedCost) {
+      setTasks(prev => prev.map(x => x.id === localId ? { ...x, status: "failed", error: "Insufficient credits" } : x));
+      return;
+    }
 
     // Flip to running immediately for UI.
   setTasks(prev => prev.map(x => x.id === localId ? ({ ...x, status: "running", startedAt: Date.now() } as any) : x));
@@ -883,6 +947,9 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
       });
     } catch (err: any) {
       const errorMsg = err?.message || "An error occurred";
+      if (String(errorMsg).includes("401")) {
+        onUnauthorized();
+      }
       setError(errorMsg);
       setTasks(prev => prev.map(x => x.id === localId ? { ...x, status: "failed", error: errorMsg } : x));
       bumpInflight(t.type, -1);
@@ -916,6 +983,17 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
   }, [tasks]);
 
   const handleGenerate = async () => {
+    if (!requireAuthOrRedirect()) return;
+
+    if (isEnhanceUnsupported) {
+      alert("Enhance is not supported on Free plan");
+      return;
+    }
+    if (isInsufficientCredits) {
+      alert("Insufficient credits");
+      return;
+    }
+
     if (activeTab === "text" && !prompt.trim()) {
       alert("Please enter a prompt");
       return;
@@ -1030,8 +1108,13 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
         aspectRatio,
         duration
       });
+          // Refresh credits after submit to keep UI consistent.
+          onRefreshUser?.();
     } catch (err: any) {
       const errorMsg = err?.message || "An error occurred";
+          if (String(errorMsg).includes("401")) {
+            onUnauthorized();
+          }
       setError(errorMsg);
       setTasks(prev => prev.map(t => t.id === localId ? { ...t, status: "failed", error: errorMsg } : t));
       bumpInflight(activeTab, -1);
@@ -1209,12 +1292,42 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
           const runningCountForTab = tasks.filter(
             (t) => t.type === activeTab && t.status === "running",
           ).length;
+          const queuedCountForTab = tasks.filter(
+            (t) => t.type === activeTab && t.status === "queued",
+          ).length;
           const limitForTab = PAGE_LIMITS[activeTab];
           const isAtCapacity = runningCountForTab >= limitForTab;
           // "loading" is the short window where we are creating/uploading and haven't
           // transitioned to polling yet. Polling should NOT block starting more tasks.
           const isBusyStarting = loadingByTab[activeTab];
-          const isDisabled = isBusyStarting || isAtCapacity;
+          const isDisabled =
+            isBusyStarting ||
+            isAtCapacity ||
+            !isLoggedIn ||
+            isEnhanceUnsupported ||
+            isInsufficientCredits;
+
+          const costText = (() => {
+            if (!isLoggedIn) return "Login required";
+            if (isEnhanceUnsupported) return "Not supported";
+            if (typeof creditCost === "number") {
+              if (creditCost <= 0) return "Free";
+              return `${creditCost} credits`;
+            }
+            return "—";
+          })();
+
+          const mainLabel = (() => {
+            if (isAtCapacity) return "At capacity";
+            if (!isLoggedIn) return "Login required";
+            if (isEnhanceUnsupported) return "Not supported";
+            if (isInsufficientCredits) return "Insufficient credits";
+            return `Generate (${costText})`;
+          })();
+
+          // Only show the (running/limit) badge when this mode is queuing (at capacity)
+          // or there are queued tasks waiting for a slot.
+          const showQueueBadge = isAtCapacity || queuedCountForTab > 0;
 
           return (
         <NeonButton
@@ -1227,12 +1340,20 @@ const HyperSellView = ({ onRefreshUser }: { onRefreshUser?: () => void }) => {
               Uploading...
             </div>
           ) : (
-            <>
-              <Zap size={18} fill="currentColor" />
-              {isAtCapacity
-                ? `At capacity (${runningCountForTab}/${limitForTab})`
-                : `Generate Video (${runningCountForTab}/${limitForTab})`}
-            </>
+            <div className="relative w-full flex items-center justify-center">
+              <div className="flex items-center justify-center gap-2">
+                <Zap size={18} fill="currentColor" />
+                <span>{mainLabel}</span>
+              </div>
+
+              {showQueueBadge ? (
+                <div className="absolute right-3 bottom-2 leading-none">
+                  <span className="px-2 py-[2px] rounded-md bg-black/30 border border-white/10 text-[10px] font-bold text-white/75">
+                    {runningCountForTab}/{limitForTab}
+                  </span>
+                </div>
+              ) : null}
+            </div>
           )}
         </NeonButton>
           );
@@ -5319,8 +5440,51 @@ const HistoryView = () => {
   );
 };
 
+// --- Credits usage cache (mirrors desktop UsageContext behavior in a lightweight, local way)
+type DailyUsageItem = { current: number; limit: number; remaining: number };
+type DailyUsageMap = Record<
+  "script_extraction" | "script_analysis" | "script_rewrite",
+  DailyUsageItem
+>;
+
+const DEFAULT_DAILY_USAGE: DailyUsageMap = {
+  script_extraction: { current: 0, limit: 50, remaining: 50 },
+  script_analysis: { current: 0, limit: 50, remaining: 50 },
+  script_rewrite: { current: 0, limit: 50, remaining: 50 },
+};
+
+const DAILY_USAGE_CACHE_KEY = "dailyUsageCache";
+
+const isSameDay = (isoA: string, isoB: string) => {
+  try {
+    return new Date(isoA).toDateString() === new Date(isoB).toDateString();
+  } catch {
+    return false;
+  }
+};
+
 // 5. Scripts Page
-const ScriptsView = () => {
+const ScriptsView = ({
+  user,
+  isLoggedIn,
+  dailyUsage,
+  dailyUsageInitialized,
+  dailyUsageLoading,
+  refreshDailyUsage,
+  updateActionUsage,
+  onUnauthorized,
+  onNavigate,
+}: {
+  user: UserProfile | null;
+  isLoggedIn: boolean;
+  dailyUsage: DailyUsageMap;
+  dailyUsageInitialized: boolean;
+  dailyUsageLoading: boolean;
+  refreshDailyUsage: (force?: boolean) => Promise<void>;
+  updateActionUsage: (actionType: keyof DailyUsageMap) => void;
+  onUnauthorized: () => void;
+  onNavigate: (tab: string) => void;
+}) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const rewriteFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -5338,6 +5502,27 @@ const ScriptsView = () => {
   const [rewriteText, setRewriteText] = useState("");
   const [rewriteImageFile, setRewriteImageFile] = useState<File | null>(null);
   const [rewriteImageUrl, setRewriteImageUrl] = useState<string | null>(null);
+
+  const actionType: keyof DailyUsageMap =
+    activeMode === "extract"
+      ? "script_extraction"
+      : activeMode === "scene"
+        ? "script_analysis"
+        : "script_rewrite";
+
+  const isFreeTier = String((user?.tier || "")).toLowerCase() === "free";
+  const usageForAction = dailyUsage?.[actionType] || DEFAULT_DAILY_USAGE[actionType];
+  const remaining = typeof usageForAction?.remaining === "number" ? usageForAction.remaining : 0;
+  const limit = typeof usageForAction?.limit === "number" ? usageForAction.limit : 0;
+  const isOutOfQuota = isFreeTier && dailyUsageInitialized && remaining <= 0;
+  const canRun = isLoggedIn && !loading && !isOutOfQuota;
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    // Refresh usage when switching mode so the remaining count is up-to-date.
+    refreshDailyUsage(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMode, isLoggedIn]);
 
   useEffect(() => {
     return () => {
@@ -5401,6 +5586,17 @@ const ScriptsView = () => {
   };
 
   const handleAnalyze = async () => {
+    if (!isLoggedIn) {
+      onNavigate("login");
+      return;
+    }
+
+    // Free tier daily usage gate (mirrors desktop behavior)
+    if (isOutOfQuota) {
+      setError("Daily limit reached. Please upgrade to continue.");
+      return;
+    }
+
     // 1. Pre-validation
     if (activeMode !== "rewrite") {
       if (!videoUrl && !uploadedFile) {
@@ -5433,6 +5629,7 @@ const ScriptsView = () => {
       if (activeMode === "extract") {
         const res = await api.post("/api/video/extract-script", { video_url: finalVideoUrl });
         setResult(getResultText(res));
+        if (isFreeTier) updateActionUsage("script_extraction");
       } else if (activeMode === "scene") {
         // SSE for scene analysis
         const token = localStorage.getItem("access_token");
@@ -5447,6 +5644,10 @@ const ScriptsView = () => {
         });
 
         if (!response.ok) {
+          if (response.status === 401) {
+            onUnauthorized();
+            throw new Error("Session expired. Please login again.");
+          }
           const errData = await response.json().catch(() => ({}));
           throw new Error(errData.detail || "Scene analysis failed");
         }
@@ -5468,6 +5669,7 @@ const ScriptsView = () => {
                 const data = line.slice(6).trim();
                 if (data === "[DONE]") {
                   setLoading(false);
+                  if (isFreeTier) updateActionUsage("script_analysis");
                   break;
                 }
                 try {
@@ -5499,9 +5701,15 @@ const ScriptsView = () => {
           image_url: imageUrl || undefined
         });
         setResult(getResultText(res));
+        if (isFreeTier) updateActionUsage("script_rewrite");
       }
     } catch (err: any) {
-      setError(err.message || "An error occurred");
+      const msg = err?.message || "An error occurred";
+      // If our API wrapper surfaced a 401 through the message, treat it as unauth.
+      if (String(msg).includes("401")) {
+        onUnauthorized();
+      }
+      setError(msg);
       setLoading(false);
     } finally {
       if (activeMode !== "scene") setLoading(false);
@@ -5741,8 +5949,9 @@ const ScriptsView = () => {
             onClick={handleAnalyze}
             className={cn(
               "bg-gradient-to-r from-fuchsia-600 to-pink-600 border-fuchsia-500/50 shadow-[0_0_20px_rgba(192,38,211,0.3)] w-full",
-              loading && "opacity-50 cursor-not-allowed"
+              (!canRun || dailyUsageLoading) && "opacity-50 cursor-not-allowed"
             )}
+            disabled={!canRun || dailyUsageLoading}
           >
             {loading ? (
               <div className="flex items-center gap-2">
@@ -5760,10 +5969,21 @@ const ScriptsView = () => {
                   {activeMode === "rewrite"
                     ? "Rewrite Script"
                     : "Analyze Video"}
+                  {isFreeTier && dailyUsageInitialized ? (
+                    <span className="ml-2 text-[10px] text-white/80 font-semibold">
+                      ({remaining}/{limit})
+                    </span>
+                  ) : null}
                 </span>
               </>
             )}
           </NeonButton>
+
+          {isFreeTier && dailyUsageInitialized && isOutOfQuota ? (
+            <div className="mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] leading-relaxed">
+              Youve reached todays free limit for this mode. Upgrade to continue.
+            </div>
+          ) : null}
         </div>
 
         {/* Results Area */}
@@ -7387,6 +7607,9 @@ export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem("access_token"));
   const isLoggedIn = !!token;
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [dailyUsage, setDailyUsage] = useState<DailyUsageMap>(DEFAULT_DAILY_USAGE);
+  const [dailyUsageLoading, setDailyUsageLoading] = useState(false);
+  const [dailyUsageInitialized, setDailyUsageInitialized] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "register" | "forgot">("login");
   const [forgotStep, setForgotStep] = useState(1);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
@@ -7408,6 +7631,86 @@ export default function App() {
     } catch (e) {
       console.warn("fetch /api/user/me error", e);
     }
+  };
+
+  const onUnauthorized = () => {
+    localStorage.removeItem("access_token");
+    setToken(null);
+    setUser(null);
+    setActiveTab("login");
+  };
+
+  const loadDailyUsageFromCache = () => {
+    const cached = localStorage.getItem(DAILY_USAGE_CACHE_KEY);
+    if (!cached) return;
+    try {
+      const parsed = JSON.parse(cached);
+      const ts = parsed?.timestamp;
+      const data = parsed?.data;
+      if (ts && data && isSameDay(String(ts), new Date().toISOString())) {
+        setDailyUsage(data as DailyUsageMap);
+        setDailyUsageInitialized(true);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const fetchDailyUsage = async (force = false) => {
+    if (!token) return;
+    if (dailyUsageLoading && !force) return;
+    try {
+      setDailyUsageLoading(true);
+      const resp = await fetch(`${API_BASE}/api/credits/daily-usage`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (resp.status === 401) {
+        onUnauthorized();
+        return;
+      }
+      const json = await resp.json().catch(() => null);
+      const next = (json?.data || json) as DailyUsageMap | null;
+
+      if (next && typeof next === "object") {
+        setDailyUsage(prev => ({ ...prev, ...next }));
+        setDailyUsageInitialized(true);
+        localStorage.setItem(
+          DAILY_USAGE_CACHE_KEY,
+          JSON.stringify({ data: next, timestamp: new Date().toISOString() }),
+        );
+      } else {
+        setDailyUsageInitialized(true);
+      }
+    } catch {
+      setDailyUsageInitialized(true);
+    } finally {
+      setDailyUsageLoading(false);
+    }
+  };
+
+  const updateActionUsage = (actionType: keyof DailyUsageMap) => {
+    setDailyUsage(prev => {
+      const cur = prev?.[actionType];
+      if (!cur) return prev;
+      const updated: DailyUsageMap = {
+        ...prev,
+        [actionType]: {
+          ...cur,
+          current: (cur.current || 0) + 1,
+          remaining: Math.max(0, (cur.remaining || 0) - 1),
+        },
+      };
+      localStorage.setItem(
+        DAILY_USAGE_CACHE_KEY,
+        JSON.stringify({ data: updated, timestamp: new Date().toISOString() }),
+      );
+      return updated;
+    });
+
+    // background reconcile
+    setTimeout(() => {
+      fetchDailyUsage(true);
+    }, 800);
   };
 
   const navigate = (tab: string) => {
@@ -7537,10 +7840,26 @@ export default function App() {
     // Fetch current user when logged in
     if (token) {
       fetchUser();
+      loadDailyUsageFromCache();
+      fetchDailyUsage(true);
     } else {
       setUser(null);
+      setDailyUsage(DEFAULT_DAILY_USAGE);
+      setDailyUsageInitialized(false);
     }
   }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    const tier = String(user?.tier || "").toLowerCase();
+    // Mirror desktop behavior: refresh every 5 min on Free tier
+    if (tier !== "free") return;
+    const t = setInterval(() => {
+      fetchDailyUsage(false);
+    }, 5 * 60 * 1000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, user?.tier]);
 
   return (
     <div className="app-fullscreen bg-slate-950 text-slate-200 font-sans selection:bg-cyan-500/30 selection:text-cyan-100 flex justify-center">
@@ -7577,8 +7896,28 @@ export default function App() {
           {activeTab === "workspace" && (
             <WorkspaceView onNavigate={navigate as any} />
           )}
-          {activeTab === "scripts" && <ScriptsView />}
-          {activeTab === "hypersell" && <HyperSellView onRefreshUser={fetchUser} />}
+          {activeTab === "scripts" && (
+            <ScriptsView
+              user={user}
+              isLoggedIn={isLoggedIn}
+              dailyUsage={dailyUsage}
+              dailyUsageInitialized={dailyUsageInitialized}
+              dailyUsageLoading={dailyUsageLoading}
+              refreshDailyUsage={(force?: boolean) => fetchDailyUsage(!!force)}
+              updateActionUsage={updateActionUsage}
+              onUnauthorized={onUnauthorized}
+              onNavigate={navigate}
+            />
+          )}
+          {activeTab === "hypersell" && (
+            <HyperSellView
+              user={user}
+              isLoggedIn={isLoggedIn}
+              onUnauthorized={onUnauthorized}
+              onNavigate={navigate}
+              onRefreshUser={fetchUser}
+            />
+          )}
           <div style={{ display: activeTab === "superip" ? 'block' : 'none' }} className="h-full">
             <SuperIpView />
           </div>
@@ -7871,11 +8210,7 @@ export default function App() {
             <ProfileView
               onNavigate={setActiveTab}
               isLoggedIn={isLoggedIn}
-              onLogout={() => {
-                localStorage.removeItem("access_token");
-                setToken(null);
-                setActiveTab("workspace");
-              }}
+              onLogout={onUnauthorized}
               user={user}
             />
           )}
