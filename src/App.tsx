@@ -1,5 +1,5 @@
 import { uploadSuperIpAudio } from "./lib/superIpAudioUpload";
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useContext } from "react";
 
 // Stable <img> that won’t remount when SuperIpView rerenders.
 // Defining this at module scope avoids recreating the memo component each render,
@@ -72,12 +72,537 @@ import {
   RefreshCcw,
   RefreshCw,
   Lock,
+  Globe,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { createPortal } from "react-dom";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { hypersellQueue } from "./lib/concurrencyQueue";
+
+// --- Internationalization ---
+export type LangKey = "en" | "zh" | "zh-TW" | "ja" | "es";
+
+export const translations: Record<LangKey, Record<string, string>> = {
+  en: {
+    "nav.workspace": "Workspace",
+    "nav.scripts": "Scripts",
+    "nav.hypersell": "HyperSell",
+    "nav.superip": "Super IP",
+    "nav.history": "History",
+    "history.loading": "Loading...",
+    "history.empty": "No history",
+    "video_insights.input.script": "ORIGINAL SCRIPT",
+    "video_insights.input.visual": "REFERENCE VISUAL (OPTIONAL)",
+    "video_insights.placeholder.script": "Enter the script content you want to rewrite...",
+    "video_insights.upload.image_btn": "Upload Image",
+    "video_insights.upload.drag_drop": "Drag & drop or click to upload",
+    "video_insights.upload.or_paste": "OR PASTE LINK",
+    "video_insights.status.processing": "Processing...",
+    "video_insights.btn.rewrite": "Rewrite Script",
+    "video_insights.btn.analyze": "Analyze Video",
+    "video_insights.limit_reached": "You have reached today's free limit for this mode. Upgrade to continue.",
+    "hypersell.status.waiting": "WAITING",
+    "hypersell.status.masterpiece": "YOUR MASTERPIECE WILL APPEAR HERE",
+    "hypersell.btn.generate": "Generate",
+    "hypersell.btn.at_capacity": "At capacity",
+    "hypersell.btn.login_required": "Login required",
+    "hypersell.btn.credits": "credits",
+    "hypersell.btn.free": "Free",
+    "hypersell.btn.unsupported": "Not supported",
+    "hypersell.btn.insufficient": "Insufficient credits",
+    "workspace.title": "Workspace",
+    "workspace.welcome": "Welcome back, ",
+    "workspace.welcome_guest": "Welcome to VGOT, log in to start creation.",
+    "workspace.projects": "Projects",
+    "workspace.quick_actions": "Quick Actions",
+    "workspace.action.analyze": "Analyze Video",
+    "workspace.action.analyze_desc": "Get script inspiration quickly, chat to explore more creativity",
+    "workspace.action.generate": "Generate Video",
+    "workspace.action.generate_desc": "Generate video, create amazing works",
+    "workspace.action.superip": "Super IP",
+    "workspace.action.superip_desc": "Create your exclusive digital character",
+    "superip.panel.upload_char": "Upload Character",
+    "superip.panel.upload_audio": "Upload Audio",
+    "superip.panel.video_gen": "Video Gen",
+    "superip.panel.open_gallery": "Open Gallery",
+    "superip.panel.uploading": "Uploading...",
+    "nav.profile": "Profile",
+    "profile.title": "Profile",
+    "profile.membership": "Membership",
+    "profile.credits_left": "credits left",
+    "profile.upgrade": "Upgrade Plan",
+    "profile.menu.partner": "Partner Program",
+    "profile.menu.billing": "Billing & Plans",
+    "profile.menu.usage": "Credits Usage",
+    "profile.login_desc": "Not logged in, log in to view profile and settings",
+    "profile.top_up": "TOP UP",
+    "profile.settings_header": "SETTINGS",
+    "profile.settings.language": "Language",
+    "profile.settings.theme": "Theme",
+    "profile.logout": "Log Out",
+    "profile.version": "Version",
+    "modal.language.title": "Select Language",
+    "common.cancel": "Cancel",
+    "common.confirm": "Confirm",
+    "common.login": "Log In",
+    "common.clear": "Clear",
+    "common.copy": "Copy",
+    "common.result": "RESULT",
+    "history.title": "HISTORY",
+    "history.filter.all": "ALL",
+    "history.filter.video": "VIDEO",
+    "history.filter.image": "IMAGE",
+    "history.filter.audio": "AUDIO",
+    "history.no_prompt": "No prompt",
+    "history.download": "Download",
+    "superip.title": "CREATE SUPER IP",
+    "superip.desc": "Create your exclusive digital character",
+    "superip.step.char": "CHAR",
+    "superip.step.voice": "VOICE",
+    "superip.step.gen": "GEN",
+    "superip.prompt.title": "ENTER PROMPT",
+    "superip.prompt.placeholder": "Describe the character you want...",
+    "superip.prompt.clear": "Clear",
+    "superip.prompt.generate": "GENERATE",
+    "superip.generated_placeholder": "Generated image will appear here",
+    "video_insights.title": "VIDEO INSIGHTS",
+    "video_insights.desc": "Choose a goal to get actionable insights fast.",
+    "video_insights.mode.extract": "Extract",
+    "video_insights.mode.scene": "Scene",
+    "video_insights.mode.rewrite": "Rewrite",
+    "video_insights.upload.placeholder": "Drag & drop or click to upload",
+    "video_insights.upload.paste_link": "OR PASTE LINK",
+    "video_insights.upload.link_placeholder": "Paste video link (TikTok supported)",
+    "video_insights.analyze_btn": "ANALYZE VIDEO",
+    "video_insights.results": "RESULTS",
+    "video_insights.results_placeholder": "Results will appear here",
+    "hypersell.title": "HYPER SELL",
+    "hypersell.desc": "Generate high-converting videos in seconds.",
+    "hypersell.tab.text_to_video": "TEXT TO VIDEO",
+    "hypersell.tab.img_to_video": "IMG TO VIDEO",
+    "hypersell.tab.enhance": "ENHANCE",
+    "hypersell.prompt.title": "PROMPT INPUT",
+    "hypersell.source_material": "SOURCE MATERIAL",
+    "hypersell.prompt.placeholder": "Describe the video you want to generate in detail...",
+    "hypersell.ratio.title": "ASPECT RATIO",
+    "hypersell.duration.title": "DURATION",
+    "hypersell.generate_btn": "GENERATE (150 CREDITS)",
+    "hypersell.result.title": "LATEST RESULT",
+    "settings.title": "SETTINGS",
+    "settings.partner": "Partner Program",
+    "settings.language": "Language",
+    "settings.billing": "Billing & Plans",
+    "settings.usage": "Credits Usage",
+    "settings.support": "Help & Support",
+  },
+  zh: {
+    "nav.workspace": "工作台",
+    "nav.scripts": "脚本",
+    "nav.hypersell": "HyperSell",
+    "nav.superip": "超级IP",
+    "nav.history": "历史记录",
+    "history.loading": "加载中...",
+    "history.empty": "暂无记录",
+    "video_insights.input.script": "原脚本",
+    "video_insights.input.visual": "参考画面 (可选)",
+    "video_insights.placeholder.script": "输入您想要重写的脚本内容...",
+    "video_insights.upload.image_btn": "上传图片",
+    "video_insights.upload.drag_drop": "拖放或点击上传",
+    "video_insights.upload.or_paste": "或粘贴链接",
+    "video_insights.status.processing": "处理中...",
+    "video_insights.btn.rewrite": "重写脚本",
+    "video_insights.btn.analyze": "分析视频",
+    "video_insights.limit_reached": "您已达到今天的免费限制。升级以继续。",
+    "hypersell.status.waiting": "等待中",
+    "hypersell.status.masterpiece": "您的杰作将显示在这里",
+    "hypersell.btn.generate": "生成",
+    "hypersell.btn.at_capacity": "已满载",
+    "hypersell.btn.login_required": "请先登录",
+    "hypersell.btn.credits": "积分",
+    "hypersell.btn.free": "免费",
+    "hypersell.btn.unsupported": "不支持",
+    "hypersell.btn.insufficient": "积分不足",
+    "workspace.title": "工作台",
+    "workspace.welcome": "欢迎回来, ",
+    "workspace.welcome_guest": "欢迎来到VGOT，登录后即可开启你的创作之旅。",
+    "workspace.projects": "项目",
+    "workspace.quick_actions": "快捷操作",
+    "workspace.action.analyze": "分析视频",
+    "workspace.action.analyze_desc": "快速获取视频的脚本灵感，聊天探索更多创意",
+    "workspace.action.generate": "生成视频",
+    "workspace.action.generate_desc": "生成视频，创造令人惊艳的作品",
+    "workspace.action.superip": "Super IP",
+    "workspace.action.superip_desc": "创建您的专属数字角色",
+    "superip.panel.upload_char": "上传角色",
+    "superip.panel.upload_audio": "上传音频",
+    "superip.panel.video_gen": "视频生成",
+    "superip.panel.open_gallery": "打开图库",
+    "superip.panel.uploading": "上传中...",
+    "nav.profile": "我的",
+    "profile.title": "个人中心",
+    "profile.membership": "会员等级",
+    "profile.credits_left": "剩余积分",
+    "profile.upgrade": "升级套餐",
+    "profile.menu.partner": "合伙人计划",
+    "profile.menu.billing": "账单与套餐",
+    "profile.menu.usage": "积分使用记录",
+    "profile.login_desc": "未登录，登录后可查看个人资料与设置",
+    "profile.top_up": "充值",
+    "profile.settings_header": "设置",
+    "profile.settings.language": "语言设置",
+    "profile.settings.theme": "主题设置",
+    "profile.logout": "退出登录",
+    "profile.version": "版本",
+    "modal.language.title": "选择语言",
+    "common.cancel": "取消",
+    "common.confirm": "确认",
+    "common.login": "登录",
+    "common.clear": "清空",
+    "common.copy": "复制",
+    "common.result": "结果",
+    "history.title": "历史记录",
+    "history.filter.all": "全部",
+    "history.filter.video": "视频",
+    "history.filter.image": "图片",
+    "history.filter.audio": "音频",
+    "history.no_prompt": "无提示词",
+    "history.download": "下载",
+    "superip.title": "创建超级IP",
+    "superip.desc": "创建您的专属数字角色",
+    "superip.step.char": "角色",
+    "superip.step.voice": "声音",
+    "superip.step.gen": "生成",
+    "superip.prompt.title": "输入提示词",
+    "superip.prompt.placeholder": "描述您想要的角色...",
+    "superip.prompt.clear": "清空",
+    "superip.prompt.generate": "生成",
+    "superip.generated_placeholder": "生成的图片将显示在这里",
+    "video_insights.title": "视频洞察",
+    "video_insights.desc": "选择一个目标以快速获取可操作的洞察。",
+    "video_insights.mode.extract": "提取",
+    "video_insights.mode.scene": "场景",
+    "video_insights.mode.rewrite": "重写",
+    "video_insights.upload.placeholder": "拖放或点击上传",
+    "video_insights.upload.paste_link": "或粘贴链接",
+    "video_insights.upload.link_placeholder": "粘贴视频链接（支持TikTok）",
+    "video_insights.analyze_btn": "分析视频",
+    "video_insights.results": "结果",
+    "video_insights.results_placeholder": "结果将显示在这里",
+    "hypersell.title": "HyperSell",
+    "hypersell.desc": "几秒钟内生成高转化率视频。",
+    "hypersell.tab.text_to_video": "文生视频",
+    "hypersell.tab.img_to_video": "图生视频",
+    "hypersell.tab.enhance": "视频增强",
+    "hypersell.prompt.title": "输入提示词",
+    "hypersell.source_material": "素材上传",
+    "hypersell.prompt.placeholder": "详细描述您想要生成的视频...",
+    "hypersell.ratio.title": "画面比例",
+    "hypersell.duration.title": "视频时长",
+    "hypersell.generate_btn": "生成视频 (150 积分)",
+    "hypersell.result.title": "最新生成结果",
+    "settings.title": "设置",
+    "settings.partner": "合伙人计划",
+    "settings.language": "语言设置",
+    "settings.billing": "账单与套餐",
+    "settings.usage": "积分使用记录",
+    "settings.support": "帮助与支持",
+  },
+  "zh-TW": {
+    "nav.workspace": "工作台",
+    "nav.scripts": "腳本",
+    "nav.hypersell": "HyperSell",
+    "nav.superip": "超級IP",
+    "nav.history": "歷史記錄",
+    "history.loading": "載入中...",
+    "history.empty": "暫無記錄",
+    "video_insights.input.script": "原腳本",
+    "video_insights.input.visual": "參考畫面 (可選)",
+    "video_insights.placeholder.script": "輸入您想要重寫的腳本內容...",
+    "video_insights.upload.image_btn": "上傳圖片",
+    "video_insights.upload.drag_drop": "拖放或點擊上傳",
+    "video_insights.upload.or_paste": "或粘貼鏈接",
+    "video_insights.status.processing": "處理中...",
+    "video_insights.btn.rewrite": "重寫腳本",
+    "video_insights.btn.analyze": "分析視頻",
+    "video_insights.limit_reached": "您已達到今天的免費限制。升級以繼續。",
+    "hypersell.status.waiting": "等待中",
+    "hypersell.status.masterpiece": "您的傑作將顯示在這裡",
+    "hypersell.btn.generate": "生成",
+    "hypersell.btn.at_capacity": "已滿載",
+    "hypersell.btn.login_required": "請先登入",
+    "hypersell.btn.credits": "積分",
+    "hypersell.btn.free": "免費",
+    "hypersell.btn.unsupported": "不支持",
+    "hypersell.btn.insufficient": "積分不足",
+    "workspace.title": "工作台",
+    "workspace.welcome": "歡迎回來, ",
+    "workspace.welcome_guest": "歡迎來到VGOT，登入後即可開啟你的創作之旅。",
+    "workspace.projects": "項目",
+    "workspace.quick_actions": "快捷操作",
+    "workspace.action.analyze": "分析視頻",
+    "workspace.action.analyze_desc": "快速獲取視頻的腳本靈感，聊天探索更多創意",
+    "workspace.action.generate": "生成視頻",
+    "workspace.action.generate_desc": "生成視頻，創造令人驚艷的作品",
+    "workspace.action.superip": "Super IP",
+    "workspace.action.superip_desc": "創建您的專屬數字角色",
+    "superip.panel.upload_char": "上傳角色",
+    "superip.panel.upload_audio": "上傳音頻",
+    "superip.panel.video_gen": "視頻生成",
+    "superip.panel.open_gallery": "打開圖庫",
+    "superip.panel.uploading": "上傳中...",
+    "nav.profile": "我的",
+    "profile.title": "個人中心",
+    "profile.membership": "會員等級",
+    "profile.credits_left": "剩餘積分",
+    "profile.upgrade": "升級套餐",
+    "profile.menu.partner": "合作夥伴計劃",
+    "profile.menu.billing": "賬單與套餐",
+    "profile.menu.usage": "積分使用記錄",
+    "profile.login_desc": "未登入，登入後可查看個人資料與設置",
+    "profile.top_up": "充值",
+    "profile.settings_header": "設置",
+    "profile.settings.language": "語言設置",
+    "profile.settings.theme": "主題設置",
+    "profile.logout": "登出",
+    "profile.version": "版本",
+    "modal.language.title": "選擇語言",
+    "common.cancel": "取消",
+    "common.confirm": "確認",
+    "common.login": "登入",
+    "common.clear": "清空",
+    "common.copy": "複製",
+    "common.result": "結果",
+    "history.title": "歷史記錄",
+    "history.filter.all": "全部",
+    "history.filter.video": "視頻",
+    "history.filter.image": "圖片",
+    "history.filter.audio": "音頻",
+    "history.no_prompt": "無提示詞",
+    "history.download": "下載",
+    "superip.title": "創建超級IP",
+    "superip.desc": "創建您的專屬數字角色",
+    "superip.step.char": "角色",
+    "superip.step.voice": "聲音",
+    "superip.step.gen": "生成",
+    "superip.prompt.title": "輸入提示詞",
+    "superip.prompt.placeholder": "描述您想要的角色...",
+    "superip.prompt.clear": "清空",
+    "superip.prompt.generate": "生成",
+    "superip.generated_placeholder": "生成的圖片將顯示在這裡",
+    "video_insights.title": "視頻洞察",
+    "video_insights.desc": "選擇一個目標以快速獲取可操作的洞察。",
+    "video_insights.mode.extract": "提取",
+    "video_insights.mode.scene": "場景",
+    "video_insights.mode.rewrite": "重寫",
+    "video_insights.upload.placeholder": "拖放或點擊上傳",
+    "video_insights.upload.paste_link": "或粘貼鏈接",
+    "video_insights.upload.link_placeholder": "粘貼視頻鏈接（支持TikTok）",
+    "video_insights.analyze_btn": "分析視頻",
+    "video_insights.results": "結果",
+    "video_insights.results_placeholder": "結果將顯示在這裡",
+    "hypersell.title": "HyperSell",
+    "hypersell.desc": "幾秒鐘內生成高轉化率視頻。",
+    "hypersell.tab.text_to_video": "文生視頻",
+    "hypersell.tab.img_to_video": "圖生視頻",
+    "hypersell.tab.enhance": "視頻增強",
+    "hypersell.prompt.title": "輸入提示詞",
+    "hypersell.source_material": "素材上傳",
+    "hypersell.prompt.placeholder": "詳細描述您想要生成的視頻...",
+    "hypersell.ratio.title": "畫面比例",
+    "hypersell.duration.title": "視頻時長",
+    "hypersell.generate_btn": "生成視頻 (150 積分)",
+    "hypersell.result.title": "最新生成結果",
+    "settings.title": "設置",
+    "settings.partner": "合作夥伴計劃",
+    "settings.language": "語言設置",
+    "settings.billing": "賬單與套餐",
+    "settings.usage": "積分使用記錄",
+    "settings.support": "幫助與支持",
+  },
+  ja: {
+    "nav.workspace": "ワークスペース",
+    "nav.scripts": "スクリプト",
+    "nav.hypersell": "ハイパーセル",
+    "nav.superip": "スーパーIP",
+    "nav.history": "履歴",
+    "workspace.title": "ワークスペース",
+    "workspace.welcome": "おかえりなさい, ",
+    "workspace.welcome_guest": "VGOTへようこそ。ログインして創作を始めましょう。",
+    "workspace.projects": "プロジェクト",
+    "workspace.quick_actions": "クイックアクション",
+    "workspace.action.analyze": "動画分析",
+    "workspace.action.analyze_desc": "動画のスクリプトインスピレーションを素早く取得",
+    "workspace.action.generate": "動画生成",
+    "workspace.action.generate_desc": "動画を生成し、素晴らしい作品を作成",
+    "workspace.action.superip": "Super IP",
+    "workspace.action.superip_desc": "専用のデジタルキャラクターを作成",
+    "superip.panel.upload_char": "キャラアップロード",
+    "superip.panel.upload_audio": "音声アップロード",
+    "superip.panel.video_gen": "動画生成",
+    "superip.panel.open_gallery": "ギャラリーを開く",
+    "superip.panel.uploading": "アップロード中...",
+    "nav.profile": "プロフィール",
+    "profile.title": "プロフィール",
+    "profile.membership": "会員ランク",
+    "profile.credits_left": "残りクレジット",
+    "profile.upgrade": "プランをアップグレード",
+    "profile.menu.partner": "パートナープログラム",
+    "profile.menu.billing": "請求とプラン",
+    "profile.menu.usage": "クレジット使用履歴",
+    "profile.settings.language": "言語設定",
+    "profile.settings.theme": "テーマ設定",
+    "profile.logout": "ログアウト",
+    "profile.version": "バージョン",
+    "modal.language.title": "言語を選択",
+    "common.cancel": "キャンセル",
+    "common.confirm": "確認",
+    "common.login": "ログイン",
+    "common.result": "結果",
+    "history.title": "履歴",
+    "history.filter.all": "すべて",
+    "history.filter.video": "動画",
+    "history.filter.image": "画像",
+    "history.filter.audio": "音声",
+    "history.no_prompt": "プロンプトなし",
+    "history.download": "ダウンロード",
+    "superip.title": "スーパーIP作成",
+    "superip.desc": "専用のデジタルキャラクターを作成",
+    "superip.step.char": "キャラ",
+    "superip.step.voice": "音声",
+    "superip.step.gen": "生成",
+    "superip.prompt.title": "プロンプト入力",
+    "superip.prompt.placeholder": "希望するキャラクターを説明してください...",
+    "superip.prompt.clear": "クリア",
+    "superip.prompt.generate": "生成",
+    "superip.generated_placeholder": "生成された画像がここに表示されます",
+    "video_insights.title": "動画インサイト",
+    "video_insights.desc": "目標を選択して、実行可能なインサイトを素早く取得します。",
+    "video_insights.mode.extract": "抽出",
+    "video_insights.mode.scene": "シーン",
+    "video_insights.mode.rewrite": "書き直し",
+    "video_insights.upload.placeholder": "ドラッグ＆ドロップまたはクリックしてアップロード",
+    "video_insights.upload.paste_link": "またはリンクを貼り付け",
+    "video_insights.upload.link_placeholder": "動画リンクを貼り付け（TikTok対応）",
+    "video_insights.analyze_btn": "動画を分析",
+    "video_insights.results": "結果",
+    "video_insights.results_placeholder": "結果がここに表示されます",
+    "hypersell.title": "ハイパーセル",
+    "hypersell.desc": "高コンバージョン動画を数秒で生成。",
+    "hypersell.tab.text_to_video": "テキスト動画",
+    "hypersell.tab.img_to_video": "画像動画",
+    "hypersell.tab.enhance": "動画強化",
+    "hypersell.prompt.title": "プロンプト入力",
+    "hypersell.prompt.placeholder": "生成したい動画を詳細に説明してください...",
+    "hypersell.ratio.title": "アスペクト比",
+    "hypersell.duration.title": "動画時間",
+    "hypersell.generate_btn": "生成する (150 クレジット)",
+    "hypersell.result.title": "最新の結果",
+    "settings.title": "設定",
+    "settings.partner": "パートナープログラム",
+    "settings.language": "言語設定",
+    "settings.billing": "請求とプラン",
+    "settings.usage": "クレジット使用履歴",
+    "settings.support": "ヘルプとサポート",
+  },
+  es: {
+    "nav.workspace": "Espacio de trabajo",
+    "nav.scripts": "Guiones",
+    "nav.hypersell": "Venta Rápida",
+    "nav.superip": "Super IP",
+    "nav.history": "Historial",
+    "workspace.title": "Espacio de trabajo",
+    "workspace.welcome": "Bienvenido de nuevo, ",
+    "workspace.welcome_guest": "Bienvenido a VGOT, inicia sesión para comenzar.",
+    "workspace.projects": "Proyectos",
+    "workspace.quick_actions": "Acciones Rápidas",
+    "workspace.action.analyze": "Analizar Video",
+    "workspace.action.analyze_desc": "Obtén inspiración para guiones rápidamente",
+    "workspace.action.generate": "Generar Video",
+    "workspace.action.generate_desc": "Genera videos, crea obras increíbles",
+    "workspace.action.superip": "Super IP",
+    "workspace.action.superip_desc": "Crea tu personaje digital exclusivo",
+    "superip.panel.upload_char": "Subir Personaje",
+    "superip.panel.upload_audio": "Subir Audio",
+    "superip.panel.video_gen": "Generación de Video",
+    "superip.panel.open_gallery": "Abrir Galería",
+    "superip.panel.uploading": "Subiendo...",
+    "nav.profile": "Perfil",
+    "profile.title": "Perfil",
+    "profile.membership": "Membresía",
+    "profile.credits_left": "créditos restantes",
+    "profile.upgrade": "Mejorar Plan",
+    "profile.menu.partner": "Programa de Socios",
+    "profile.menu.billing": "Facturación y Planes",
+    "profile.menu.usage": "Uso de Créditos",
+    "profile.settings.language": "Idioma",
+    "profile.settings.theme": "Tema",
+    "profile.logout": "Cerrar Sesión",
+    "profile.version": "Versión",
+    "modal.language.title": "Seleccionar Idioma",
+    "common.cancel": "Cancelar",
+    "common.confirm": "Confirmar",
+    "common.login": "Iniciar Sesión",
+    "common.result": "RESULTADO",
+    "history.title": "HISTORIAL",
+    "history.filter.all": "TODO",
+    "history.filter.video": "VIDEO",
+    "history.filter.image": "IMAGEN",
+    "history.filter.audio": "AUDIO",
+    "history.no_prompt": "Sin indicación",
+    "history.download": "Descargar",
+    "superip.title": "CREAR SUPER IP",
+    "superip.desc": "Crea tu personaje digital exclusivo",
+    "superip.step.char": "PERSONAJE",
+    "superip.step.voice": "VOZ",
+    "superip.step.gen": "GENERAR",
+    "superip.prompt.title": "INGRESAR PROMPT",
+    "superip.prompt.placeholder": "Describe el personaje que deseas...",
+    "superip.prompt.clear": "Borrar",
+    "superip.prompt.generate": "GENERAR",
+    "superip.generated_placeholder": "La imagen generada aparecerá aquí",
+    "video_insights.title": "INFORMACIÓN DE VIDEO",
+    "video_insights.desc": "Elige un objetivo para obtener información procesable rápidamente.",
+    "video_insights.mode.extract": "Extraer",
+    "video_insights.mode.scene": "Escena",
+    "video_insights.mode.rewrite": "Reescribir",
+    "video_insights.upload.placeholder": "Arrastra y suelta o haz clic para subir",
+    "video_insights.upload.paste_link": "O PEGA EL ENLACE",
+    "video_insights.upload.link_placeholder": "Pega el enlace del video (compatible con TikTok)",
+    "video_insights.analyze_btn": "ANALIZAR VIDEO",
+    "video_insights.results": "RESULTADOS",
+    "video_insights.results_placeholder": "Los resultados aparecerán aquí",
+    "hypersell.title": "VENTA RÁPIDA",
+    "hypersell.desc": "Genera videos de alta conversión en segundos.",
+    "hypersell.tab.text_to_video": "TEXTO A VIDEO",
+    "hypersell.tab.img_to_video": "IMAGEN A VIDEO",
+    "hypersell.tab.enhance": "MEJORAR",
+    "hypersell.prompt.title": "ENTRADA DE PROMPT",
+    "hypersell.prompt.placeholder": "Describe el video que deseas generar en detalle...",
+    "hypersell.ratio.title": "RELACIÓN DE ASPECTO",
+    "hypersell.duration.title": "DURACIÓN",
+    "hypersell.generate_btn": "GENERAR (150 CRÉDITOS)",
+    "hypersell.result.title": "ÚLTIMO RESULTADO",
+    "settings.title": "CONFIGURACIÓN",
+    "settings.partner": "Programa de Socios",
+    "settings.language": "Idioma",
+    "settings.billing": "Facturación y Planes",
+    "settings.usage": "Uso de Créditos",
+    "settings.support": "Ayuda y Soporte",
+  }
+};
+
+export const LanguageContext = React.createContext<{
+  lang: LangKey;
+  setLang: (l: LangKey) => void;
+  t: (key: string) => string;
+}>({
+  lang: "en",
+  setLang: () => {},
+  t: (key) => key,
+});
+
+export const useTranslation = () => React.useContext(LanguageContext);
 
 // --- Utility ---
 function cn(...inputs: ClassValue[]) {
@@ -179,6 +704,7 @@ const WorkspaceView = ({
 }: {
   onNavigate: (tab: "workspace" | "scripts" | "hypersell" | "superip" | "history" | "profile" | "partner_program" | "credits_usage") => void;
 }) => {
+  const { t } = useTranslation();
   // Local-only state for showing user display name and credits
   const [wsName, setWsName] = useState<string | null>(null);
   const [wsCredits, setWsCredits] = useState<number | null>(null);
@@ -218,13 +744,13 @@ const WorkspaceView = ({
     <div className="space-y-6 pb-24 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <header className="mb-6">
         <h1 className="text-3xl font-black text-white tracking-tight uppercase">
-          Workspace
+          {t("workspace.title")}
         </h1>
         <p className="text-slate-400 text-sm mt-1">
           {wsName ? (
-            <>Welcome back, {wsName}.</>
+            <>{t("workspace.welcome")}{wsName}.</>
           ) : (
-            <>欢迎来到VGOT，登录后即可开启你的创作之旅。</>
+            <>{t("workspace.welcome_guest")}</>
           )}
         </p>
       </header>
@@ -238,7 +764,7 @@ const WorkspaceView = ({
             12
           </span>
           <span className="text-xs text-slate-400 uppercase tracking-wider">
-            Projects
+            {t("workspace.projects")}
           </span>
         </GlassCard>
         <GlassCard className="flex flex-col items-center justify-center py-6 border-fuchsia-500/20 bg-slate-800/40">
@@ -249,13 +775,13 @@ const WorkspaceView = ({
             {wsCredits !== null ? wsCredits : "—"}
           </span>
           <span className="text-xs text-slate-400 uppercase tracking-wider">
-            Credits
+            {t("profile.membership") || "Credits"}
           </span>
         </GlassCard>
       </div>
 
       <h2 className="text-sm font-bold text-cyan-400/80 uppercase tracking-wider mt-8 mb-4">
-        Quick Actions
+        {t("workspace.quick_actions")}
       </h2>
       <div className="space-y-3">
         {/* Analyze Video - Uses Blue/Message style (moved above Generate) */}
@@ -269,10 +795,10 @@ const WorkspaceView = ({
             </div>
             <div className="text-left">
               <div className="text-white font-medium">
-                分析视频
+                {t("workspace.action.analyze")}
               </div>
               <div className="text-slate-500 text-xs">
-                快速获取视频的脚本灵感，聊天探索更多创意
+                {t("workspace.action.analyze_desc")}
               </div>
             </div>
           </div>
@@ -290,10 +816,10 @@ const WorkspaceView = ({
             </div>
             <div className="text-left">
               <div className="text-white font-medium">
-                生成视频
+                {t("workspace.action.generate")}
               </div>
               <div className="text-slate-500 text-xs">
-                生成视频，创造令人惊艳的作品
+                {t("workspace.action.generate_desc")}
               </div>
             </div>
           </div>
@@ -311,10 +837,10 @@ const WorkspaceView = ({
             </div>
             <div className="text-left">
               <div className="text-white font-medium">
-                Super IP
+                {t("workspace.action.superip")}
               </div>
               <div className="text-slate-500 text-xs">
-                创建您的专属数字角色
+                {t("workspace.action.superip_desc")}
               </div>
             </div>
           </div>
@@ -436,6 +962,10 @@ const HyperSellView = ({
   onNavigate: (tab: string) => void;
   onRefreshUser?: () => void;
 }) => {
+  // Use translation
+  const { t } = useTranslation();
+
+  // Use string keys for tabs for translation
   const [activeTab, setActiveTab] = useState<"text" | "image" | "enhance">("text");
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -1127,19 +1657,19 @@ const HyperSellView = ({
     <div className="flex flex-col h-full pb-24 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <header className="mb-6">
         <h1 className="text-xl font-black text-white tracking-tight uppercase">
-          Hyper Sell
+          {t("hypersell.title")}
         </h1>
         <p className="text-slate-400 text-xs mt-1">
-          Generate high-converting videos in seconds.
+          {t("hypersell.desc")}
         </p>
       </header>
 
       {/* Top Tabs */}
       <div className="flex p-1 bg-slate-900/80 rounded-lg mb-6 sticky top-0 z-20 backdrop-blur-xl border border-white/5">
         {[
-          { id: "text", label: "Text to Video" },
-          { id: "image", label: "Img to Video" },
-          { id: "enhance", label: "Enhance" },
+          { id: "text", label: t("hypersell.tab.text_to_video") },
+          { id: "image", label: t("hypersell.tab.img_to_video") },
+          { id: "enhance", label: t("hypersell.tab.enhance") },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -1161,8 +1691,8 @@ const HyperSellView = ({
         <div className="space-y-4">
           <label className="text-xs uppercase tracking-widest text-cyan-400/80 font-semibold ml-1">
             {activeTab === "text"
-              ? "Prompt Input"
-              : "Source Material"}
+              ? t("hypersell.prompt.title")
+              : t("hypersell.source_material")}
           </label>
 
           {activeTab === "image" || activeTab === "enhance" ? (
@@ -1213,11 +1743,11 @@ const HyperSellView = ({
               {activeTab === "image" && (
                 <div className="space-y-2 mt-4">
                   <label className="text-[10px] uppercase tracking-widest text-cyan-400 font-bold">
-                    Prompt Input
+                    {t("hypersell.prompt.title")}
                   </label>
                   <textarea
                     className="w-full h-32 bg-slate-950/50 border border-slate-700 rounded-lg p-4 text-white resize-none focus:border-cyan-400 focus:shadow-[0_0_15px_rgba(6,182,212,0.2)] outline-none transition-all placeholder:text-slate-600"
-                    placeholder="Describe the video you want to generate in detail..."
+                    placeholder={t("hypersell.prompt.placeholder")}
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
                   />
@@ -1227,7 +1757,7 @@ const HyperSellView = ({
           ) : (
             <textarea
               className="w-full h-32 bg-slate-950/50 border border-slate-700 rounded-lg p-4 text-white resize-none focus:border-cyan-400 focus:shadow-[0_0_15px_rgba(6,182,212,0.2)] outline-none transition-all placeholder:text-slate-600"
-              placeholder="Describe the video you want to generate in detail..."
+              placeholder={t("hypersell.prompt.placeholder")}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
@@ -1240,7 +1770,7 @@ const HyperSellView = ({
             <div className="grid grid-cols-2 gap-4 pt-2">
               <div className="space-y-2">
                 <label className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
-                  Aspect Ratio
+                  {t("hypersell.ratio.title")}
                 </label>
                 <select
                   className="w-full bg-slate-900 border border-slate-700 text-white text-sm rounded-md p-2.5 outline-none focus:border-cyan-500/50"
@@ -1253,7 +1783,7 @@ const HyperSellView = ({
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
-                  Duration
+                  {t("hypersell.duration.title")}
                 </label>
                 <select
                   className="w-full bg-slate-900 border border-slate-700 text-white text-sm rounded-md p-2.5 outline-none focus:border-cyan-500/50"
@@ -1308,21 +1838,21 @@ const HyperSellView = ({
             isInsufficientCredits;
 
           const costText = (() => {
-            if (!isLoggedIn) return "Login required";
-            if (isEnhanceUnsupported) return "Not supported";
+            if (!isLoggedIn) return t("hypersell.btn.login_required");
+            if (isEnhanceUnsupported) return t("hypersell.btn.unsupported");
             if (typeof creditCost === "number") {
-              if (creditCost <= 0) return "Free";
-              return `${creditCost} credits`;
+              if (creditCost <= 0) return t("hypersell.btn.free");
+              return `${creditCost} ${t("hypersell.btn.credits")}`;
             }
             return "—";
           })();
 
           const mainLabel = (() => {
-            if (isAtCapacity) return "At capacity";
-            if (!isLoggedIn) return "Login required";
-            if (isEnhanceUnsupported) return "Not supported";
-            if (isInsufficientCredits) return "Insufficient credits";
-            return `Generate (${costText})`;
+            if (isAtCapacity) return t("hypersell.btn.at_capacity");
+            if (!isLoggedIn) return t("hypersell.btn.login_required");
+            if (isEnhanceUnsupported) return t("hypersell.btn.unsupported");
+            if (isInsufficientCredits) return t("hypersell.btn.insufficient");
+            return `${t("hypersell.btn.generate")} (${costText})`;
           })();
 
           // Only show the (running/limit) badge when this mode is queuing (at capacity)
@@ -1333,11 +1863,12 @@ const HyperSellView = ({
         <NeonButton
           onClick={handleGenerate}
           disabled={isDisabled}
+          className="py-2.5 text-xs"
         >
           {isBusyStarting ? (
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Uploading...
+              {t("superip.panel.uploading")}
             </div>
           ) : (
             <div className="relative w-full flex items-center justify-center">
@@ -1393,8 +1924,8 @@ const HyperSellView = ({
                 <Bot size={40} className="text-slate-600 animate-pulse" />
               </div>
               <div className="flex flex-col items-center gap-2 text-center px-4">
-                <span className="text-slate-400 text-base font-black uppercase tracking-[0.3em]">Waiting</span>
-                <span className="text-slate-600 text-xs uppercase tracking-widest font-medium">Your masterpiece will appear here</span>
+                <span className="text-slate-400 text-base font-black uppercase tracking-[0.3em]">{t("hypersell.status.waiting")}</span>
+                <span className="text-slate-600 text-xs uppercase tracking-widest font-medium">{t("hypersell.status.masterpiece")}</span>
               </div>
             </div>
           </div>
@@ -1406,6 +1937,7 @@ const HyperSellView = ({
 
 // 3. Super IP (Digital Human)
 const SuperIpView = () => {
+  const { t } = useContext(LanguageContext);
   const [step, setStep] = useState(1);
   const [isSendIconPink, setIsSendIconPink] = useState(false);
   const [isAudioSelected, setIsAudioSelected] = useState(false);
@@ -1419,9 +1951,12 @@ const SuperIpView = () => {
   const [characterImageBase64, setCharacterImageBase64] = useState<string | null>(null);
   const [audioBase64, setAudioBase64] = useState<string | null>(null);
   const [selectedAudioHistoryId, setSelectedAudioHistoryId] = useState<number | string | null>(null);
+  // For GEN billing: always prefer the user's audio duration (seconds)
+  const [selectedAudioDurationSec, setSelectedAudioDurationSec] = useState<number | null>(null);
 
   // SuperIP Gen (Step 3)
-  const SUPERIP_DEFAULT_DURATION_SEC = 10;
+  // NOTE: Do not fall back to a default duration. If we can't resolve audio duration,
+  // we must block billed actions because backend bills by req.duration (seconds).
 
   interface SuperIpTask {
     internalId: string;
@@ -1628,6 +2163,210 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
     useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // --- Credits check cache (mobile SuperIP) ---
+  type CreditsCheckData = {
+    allowed?: boolean;
+    required_credits?: number;
+    current_credits?: number;
+    tier?: string;
+    upgrade_required?: boolean;
+    insufficient_credits?: boolean;
+    daily_limit_reached?: boolean;
+    [k: string]: any;
+  };
+
+  const [creditsCheckImage, setCreditsCheckImage] = useState<CreditsCheckData | null>(null);
+  const [creditsCheckLoadingImage, setCreditsCheckLoadingImage] = useState(false);
+
+  const [creditsCheckVoice, setCreditsCheckVoice] = useState<CreditsCheckData | null>(null);
+  const [creditsCheckLoadingVoice, setCreditsCheckLoadingVoice] = useState(false);
+
+  const [creditsCheckGenCom, setCreditsCheckGenCom] = useState<CreditsCheckData | null>(null);
+  const [creditsCheckLoadingGenCom, setCreditsCheckLoadingGenCom] = useState(false);
+
+  const [creditsCheckGenPro, setCreditsCheckGenPro] = useState<CreditsCheckData | null>(null);
+  const [creditsCheckLoadingGenPro, setCreditsCheckLoadingGenPro] = useState(false);
+
+  // System/library voice billing (match desktop Vgot_front):
+  // - within 400 chars => 20 credits
+  // - each additional 400 chars => +20 credits
+  // We express this as "units" so quantity can be passed to /api/credits/check.
+  const systemVoiceUnitsForText = (textLen: number) => {
+    const n = Math.max(0, Number(textLen) || 0);
+    if (n <= 0) return 0;
+    return Math.ceil(n / 400);
+  };
+
+  const checkCredits = async (actionType: string, quantity: number) => {
+    const token = localStorage.getItem("access_token");
+    const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || "";
+    if (!token) throw new Error("401");
+
+    const resp = await fetch(`${API_BASE}/api/credits/check`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ action_type: actionType, quantity }),
+    });
+
+    if (resp.status === 401) throw new Error("401");
+    const json = await resp.json().catch(() => null);
+    const data = (json?.data || json) as CreditsCheckData | null;
+    return data;
+  };
+
+  const refreshMeBestEffort = async () => {
+    try {
+      const token = localStorage.getItem("access_token");
+      const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || "";
+      if (!token) return;
+
+      const r = await fetch(`${API_BASE}/api/user/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!r.ok) return;
+      const j = await r.json().catch(() => null);
+      if (j && typeof j?.credits === "number") {
+        localStorage.setItem("credits", String(j.credits));
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  // Prefetch credit costs for better UX (show on button before click)
+  useEffect(() => {
+    if (step !== 1) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        setCreditsCheckLoadingImage(true);
+        const d = await checkCredits("superip_image_gen", 1);
+        if (!cancelled) setCreditsCheckImage(d);
+      } catch {
+        // If not logged in (or check fails), just don't show the badge.
+        if (!cancelled) setCreditsCheckImage(null);
+      } finally {
+        if (!cancelled) setCreditsCheckLoadingImage(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, prompt]);
+
+  useEffect(() => {
+    if (step !== 2) return;
+    if (!voiceText || !voiceText.trim()) {
+      // When the input is empty, don't keep showing stale required_credits.
+      setCreditsCheckVoice(null);
+      setCreditsCheckLoadingVoice(false);
+      return;
+    }
+    const source_type = overrideVoiceId ? "system" : cloneFileId ? "clone" : "waveform";
+    const actionType = source_type === "system" ? "superip_voice_gen_system" : "superip_voice_gen_waveform";
+    const qty = source_type === "system" ? systemVoiceUnitsForText(voiceText.trim().length) : 1;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      (async () => {
+        try {
+          setCreditsCheckLoadingVoice(true);
+          const d = await checkCredits(actionType, Math.max(1, qty));
+          if (!cancelled) setCreditsCheckVoice(d);
+        } catch {
+          // ignore
+        } finally {
+          if (!cancelled) setCreditsCheckLoadingVoice(false);
+        }
+      })();
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, voiceText, overrideVoiceId, cloneFileId]);
+
+  useEffect(() => {
+    // if (step !== 3) return; // Allow credit check for all steps
+    let cancelled = false;
+    const t = setTimeout(() => {
+      (async () => {
+        try {
+          setCreditsCheckLoadingGenCom(true);
+          const resolved =
+            typeof selectedAudioDurationSec === 'number' && selectedAudioDurationSec > 0
+              ? Math.max(1, Math.round(selectedAudioDurationSec))
+              : (selectedAudioUrl
+                  ? Math.max(1, Math.round(await getAudioDurationSeconds(String(selectedAudioUrl))))
+                  : 0);
+
+          // If we cannot resolve duration, we also cannot compute required credits.
+          // Clear the badge instead of guessing.
+          if (!resolved || resolved <= 0) {
+            if (!cancelled) setCreditsCheckGenCom(null);
+            return;
+          }
+          // IMPORTANT: /api/credits/check expects quantity in *units* (seconds here),
+          // and backend will compute required_credits = cost_per_unit * quantity.
+          const d = await checkCredits("superip_video_gen", resolved);
+          if (!cancelled) setCreditsCheckGenCom(d);
+        } catch {
+          // ignore
+        } finally {
+          if (!cancelled) setCreditsCheckLoadingGenCom(false);
+        }
+      })();
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, selectedAudioUrl, selectedAudioDurationSec]);
+
+  // Prefetch Pro credit costs (durationSec * 80) so we can show it on the PRO button
+  useEffect(() => {
+    // if (step !== 3) return; // Allow credit check for all steps
+    let cancelled = false;
+    const t = setTimeout(() => {
+      (async () => {
+        try {
+          setCreditsCheckLoadingGenPro(true);
+          const resolved =
+            typeof selectedAudioDurationSec === 'number' && selectedAudioDurationSec > 0
+              ? Math.max(1, Math.round(selectedAudioDurationSec))
+              : (selectedAudioUrl
+                  ? Math.max(1, Math.round(await getAudioDurationSeconds(String(selectedAudioUrl))))
+                  : 0);
+
+          if (!resolved || resolved <= 0) {
+            if (!cancelled) setCreditsCheckGenPro(null);
+            return;
+          }
+
+          // Same rule: quantity is seconds.
+          const d = await checkCredits("superip_video_gen_pro", resolved).catch(() =>
+            checkCredits("superip_video_gen", resolved)
+          );
+          if (!cancelled) setCreditsCheckGenPro(d);
+        } catch {
+          // ignore
+        } finally {
+          if (!cancelled) setCreditsCheckLoadingGenPro(false);
+        }
+      })();
+    }, 220);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, selectedAudioUrl, selectedAudioDurationSec]);
+
   const loadSuperIpVideoHistory = async () => {
     try {
       const token = localStorage.getItem('access_token');
@@ -1678,6 +2417,52 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
         resolve(0);
       }
     });
+  };
+
+  const getAudioDurationSecondsFromFile = (file: File): Promise<number> => {
+    return new Promise((resolve) => {
+      try {
+        const objUrl = URL.createObjectURL(file);
+        const a = new Audio();
+        a.preload = 'metadata';
+        a.src = objUrl;
+        a.onloadedmetadata = () => {
+          try {
+            URL.revokeObjectURL(objUrl);
+          } catch {
+            // ignore
+          }
+          const d = Number.isFinite(a.duration) ? a.duration : 0;
+          resolve(Math.max(1, Math.round(d || 0)));
+        };
+        a.onerror = () => {
+          try {
+            URL.revokeObjectURL(objUrl);
+          } catch {
+            // ignore
+          }
+          resolve(0);
+        };
+      } catch {
+        resolve(0);
+      }
+    });
+  };
+
+  const resolveSelectedAudioDurationSeconds = async (opts: { file?: File; url?: string | null }) => {
+    const dFromFile = opts.file ? await getAudioDurationSecondsFromFile(opts.file) : 0;
+    if (dFromFile > 0) {
+      setSelectedAudioDurationSec(dFromFile);
+      return dFromFile;
+    }
+    const u = (opts.url || '').toString().trim();
+    if (u) {
+      const d = await getAudioDurationSeconds(u);
+      if (d > 0) setSelectedAudioDurationSec(d);
+      return d;
+    }
+    setSelectedAudioDurationSec(null);
+    return 0;
   };
 
   const uploadDataUrlToSupabase = async (fileData: string, filename: string, folder: string) => {
@@ -1744,7 +2529,54 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
     return String(fileName);
   };
 
-  const startSuperIpGen = async (mode: 'default' | 'custom') => {
+  const startSuperIpGen = async (mode: 'default' | 'custom' | 'pro') => {
+    // Credits check: backend bills per second.
+    // IMPORTANT: /api/credits/check expects quantity in seconds (units),
+    // not pre-multiplied credits.
+    try {
+      setCreditsCheckLoadingGenCom(true);
+      const durationSec =
+        typeof selectedAudioDurationSec === 'number' && selectedAudioDurationSec > 0
+          ? Math.max(1, Math.round(selectedAudioDurationSec))
+          : (selectedAudioUrl
+              ? Math.max(1, Math.round(await getAudioDurationSeconds(String(selectedAudioUrl))))
+              : 0);
+
+      if (!durationSec || durationSec <= 0) {
+        alert('无法获取音频时长，任务无法执行。请重新上传音频或选择可访问的音频链接。');
+        return;
+      }
+      const actionType = mode === 'pro' ? "superip_video_gen_pro" : "superip_video_gen";
+      const check = await checkCredits(actionType, durationSec);
+      if (mode === 'pro') {
+        setCreditsCheckGenPro(check);
+      } else {
+        setCreditsCheckGenCom(check);
+      }
+      if (check && check.allowed === false) {
+        if (check.upgrade_required) {
+          alert("需要升级套餐才能使用该功能");
+        } else if (check.daily_limit_reached) {
+          alert("今日次数已用完，请稍后再试或升级套餐");
+        } else if (check.insufficient_credits) {
+          alert("积分不足");
+        } else {
+          alert("暂不可用");
+        }
+        return;
+      }
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      if (msg.includes("401")) {
+        alert("请先登录");
+        return;
+      }
+      console.warn("Credits check (gen/com) failed:", e);
+      // Fail-open
+    } finally {
+      setCreditsCheckLoadingGenCom(false);
+    }
+
     // Check concurrency limit (max 3 active tasks)
     const activeCount = superIpTasks.filter(t => t.status === 'processing' || t.status === 'queued').length;
     if (activeCount >= 3) {
@@ -1843,10 +2675,20 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
       }
 
       // 3) Determine duration
-      // Duration is system default on mobile (matches Vgot_front behavior)
-      const durationSec = SUPERIP_DEFAULT_DURATION_SEC;
+      // Backend bills by req.duration (seconds). Desktop uses audio duration.
+      const durationSec =
+        typeof selectedAudioDurationSec === 'number' && selectedAudioDurationSec > 0
+          ? Math.max(1, Math.round(selectedAudioDurationSec))
+          : (selectedAudioUrl
+              ? Math.max(1, Math.round(await getAudioDurationSeconds(String(selectedAudioUrl))))
+              : 0);
 
-      const res = await api.post('/api/superip/start', {
+      if (!durationSec || durationSec <= 0) {
+        throw new Error('无法获取音频时长，任务无法执行。请重新上传音频或选择可访问的音频链接。');
+      }
+
+      const startEndpoint = mode === 'pro' ? '/api/superip/start_pro' : '/api/superip/start';
+      const res = await api.post(startEndpoint, {
         image_file_name: imageFileName,
         audio_file_name: audioFileName,
         prompt: (superIpGenPrompt || '').trim() || null,
@@ -1873,6 +2715,8 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
           }
           // backend already saves history in outputs; refresh mini history
           loadSuperIpVideoHistory();
+          // Sync credits
+          refreshMeBestEffort();
           break;
         } else if (out?.status === 'failed') {
            throw new Error(out?.error || 'Generation failed');
@@ -1884,7 +2728,11 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
       const msg = e?.message || String(e);
       setSuperIpGenError(msg);
       console.warn('SuperIP Gen failed:', e);
-      alert(msg);
+      if (String(msg).includes('401')) {
+        alert('请先登录');
+      } else {
+        alert(msg);
+      }
       setSuperIpTasks(prev => prev.map(t => t.internalId === internalId ? { ...t, status: 'failed', error: msg } : t));
     }
   };
@@ -1907,6 +2755,35 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
     if (!prompt || !prompt.trim()) {
       alert('请输入提示词');
       return;
+    }
+
+    // Credits check: CHAR only charges for image generation.
+    try {
+      setCreditsCheckLoadingImage(true);
+      const check = await checkCredits("superip_image_gen", 1);
+      setCreditsCheckImage(check);
+      if (check && check.allowed === false) {
+        if (check.upgrade_required) {
+          alert("需要升级套餐才能使用该功能");
+        } else if (check.daily_limit_reached) {
+          alert("今日次数已用完，请稍后再试或升级套餐");
+        } else if (check.insufficient_credits) {
+          alert("积分不足");
+        } else {
+          alert("暂不可用");
+        }
+        return;
+      }
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      if (msg.includes("401")) {
+        alert("请先登录");
+        return;
+      }
+      console.warn("Credits check failed:", e);
+      // Fail-open: if check endpoint is down, let backend generation endpoint decide.
+    } finally {
+      setCreditsCheckLoadingImage(false);
     }
 
     setIsGenerating(true);
@@ -1983,12 +2860,18 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
           
           // 刷新图库（后台静默加载）
           loadGalleryImages();
+          // Sync credits after successful deduction
+          refreshMeBestEffort();
         } else {
           console.error('❌ 未找到图片URL，完整响应:', data);
           alert('生成失败：未返回图片URL');
         }
       } else {
-        const errorData = await response.json();
+        if (response.status === 401) {
+          alert('请先登录');
+          return;
+        }
+        const errorData = await response.json().catch(() => ({} as any));
         alert(`生成失败: ${errorData.detail || response.statusText}`);
       }
     } catch (error) {
@@ -2174,6 +3057,8 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
     setSelectedAudio({ name: 'Audio selected', url: audioUrl });
     // URL/history selections generally don't have RH fileName; clear so GEN can fallback-upload if needed.
     setSuperIpAudioRhFileName(null);
+  // Prefer duration from URL
+  resolveSelectedAudioDurationSeconds({ url: audioUrl });
     // Keep the history modal open so the user can see the selected border highlight.
     // (They can close manually via the close button.)
     // setShowAudioGallery(false);
@@ -2198,8 +3083,14 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
     setSelectedAudio(null);
     setLocalUploadedAudioName(null);
     setAudioBase64(null);
+    setSelectedAudioDurationSec(null);
     setSuperIpAudioRhFileName(null);
     setSelectedAudioHistoryId(null);
+    // Clear GEN credit badges immediately when audio is cleared
+    setCreditsCheckGenCom(null);
+    setCreditsCheckGenPro(null);
+    setCreditsCheckLoadingGenCom(false);
+    setCreditsCheckLoadingGenPro(false);
     if (audioUploadInputRef.current) audioUploadInputRef.current.value = "";
   };
 
@@ -2209,6 +3100,12 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
     setLocalUploadedAudioName(null);
     setAudioBase64(null);
     setSuperIpAudioRhFileName(null);
+    // Local upload cleared => duration is unknown again; clear credit badges
+    setSelectedAudioDurationSec(null);
+    setCreditsCheckGenCom(null);
+    setCreditsCheckGenPro(null);
+    setCreditsCheckLoadingGenCom(false);
+    setCreditsCheckLoadingGenPro(false);
     if (audioUploadInputRef.current) audioUploadInputRef.current.value = "";
   };
 
@@ -2248,6 +3145,8 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
       // Local upload: set the source URL but don't overwrite the Generated Audio card state.
       setSelectedAudioUrl(result.url);
       setLocalUploadedAudioName(file.name);
+  // Prefer duration from local file (no CORS issues)
+  resolveSelectedAudioDurationSeconds({ file, url: result.url });
 
       // Desktop parity: upload the same audio file to RunningHub to get a fileName for GEN.
       try {
@@ -2372,7 +3271,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
               className="text-slate-600 group-hover:text-cyan-400 transition-colors"
             />
             <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
-              {isUploadingCharacterImage ? "上传中..." : "上传角色"}
+              {isUploadingCharacterImage ? t("superip.panel.uploading") : t("superip.panel.upload_char")}
             </span>
           </>
         )}
@@ -2803,10 +3702,42 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
       return;
     }
 
+    // Credits check (desktop parity):
+    // - Custom/Clone (waveform) => superip_voice_gen_waveform (first free then 3000 via backend)
+    // - System/library voice => superip_voice_gen_system (quantity = units based on text length)
+    const source_type = overrideVoiceId ? "system" : cloneFileId ? "clone" : "waveform";
+    try {
+      setCreditsCheckLoadingVoice(true);
+      const actionType = source_type === "system" ? "superip_voice_gen_system" : "superip_voice_gen_waveform";
+      const qty = source_type === "system" ? systemVoiceUnitsForText(voiceText.trim().length) : 1;
+      const check = await checkCredits(actionType, Math.max(1, qty));
+      setCreditsCheckVoice(check);
+      if (check && check.allowed === false) {
+        if (check.upgrade_required) {
+          alert("需要升级套餐才能使用该功能");
+        } else if (check.daily_limit_reached) {
+          alert("今日次数已用完，请稍后再试或升级套餐");
+        } else if (check.insufficient_credits) {
+          alert("积分不足");
+        } else {
+          alert("暂不可用");
+        }
+        return;
+      }
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      if (msg.includes("401")) {
+        alert("请先登录");
+        return;
+      }
+      console.warn("Credits check (voice) failed:", e);
+      // Fail-open
+    } finally {
+      setCreditsCheckLoadingVoice(false);
+    }
+
     setIsGenerating(true);
     try {
-      // keep consistent with backend expectations: system voice vs trial waveform vs clone
-      const source_type = overrideVoiceId ? "system" : cloneFileId ? "clone" : "waveform";
       const res: any = await api.post("/api/audio/synthesize", {
         text: voiceText,
         voice_id: effectiveVoiceId,
@@ -2824,6 +3755,11 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
       setSelectedAudioUrl(String(audioUrl));
       setSelectedAudio({ name: "generated_audio.mp3", url: String(audioUrl) });
       setGeneratedAudio(true);
+  // Update duration from URL (best-effort)
+  resolveSelectedAudioDurationSeconds({ url: String(audioUrl) });
+
+  // Sync credits after successful deduction
+  refreshMeBestEffort();
 
       // Dual-track: best-effort fetch -> base64 (data URL) so downstream APIs can use inline audio
       // Note: this may fail if the audio URL doesn't allow CORS; keep non-blocking.
@@ -2880,7 +3816,12 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
         console.warn("Failed to save synthesized audio to history", e);
       }
     } catch (e: any) {
-      alert(e?.message || "合成失败");
+      const msg = e?.message || "合成失败";
+      if (String(msg).includes("401")) {
+        alert("请先登录");
+        return;
+      }
+      alert(msg);
     } finally {
       setIsGenerating(false);
     }
@@ -2895,7 +3836,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
       </header>
 
       {/* Progress Circuit */}
-      <div className="mb-8 relative">
+      <div className="mb-2 relative">
         <div className="absolute top-1/2 left-0 w-full h-[2px] bg-slate-800 -translate-y-1/2" />
         <div
           className="absolute top-1/2 left-0 h-[2px] bg-cyan-500 -translate-y-1/2 transition-all duration-500 shadow-[0_0_10px_#22d3ee]"
@@ -2907,30 +3848,31 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
           {steps.map((s) => {
             const isActive = s.num <= step;
             const isCurrent = s.num === step;
+
+            let iconSrc = "";
+            if (s.num === 1) iconSrc = "/1.svg";
+            else if (s.num === 2) iconSrc = "/2.svg";
+            else iconSrc = "/3.svg";
+
             return (
               <div
                 key={s.num}
-                className="flex flex-col items-center gap-2"
+                className="flex flex-col items-center gap-0"
               >
                 <div
                   className={cn(
-                    "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all duration-300 bg-slate-950",
+                    "w-16 h-16 flex items-center justify-center transition-all duration-300 bg-slate-950 p-2",
                     isActive
-                      ? "border-cyan-500 text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.5)]"
-                      : "border-slate-700 text-slate-600",
-                    isCurrent &&
-                    "scale-110 ring-2 ring-cyan-500/30",
+                      ? "opacity-100 drop-shadow-[0_0_8px_rgba(34,211,238,0.8)]"
+                      : "opacity-30 grayscale",
+                    isCurrent && "scale-110"
                   )}
                 >
-                  {isActive ? (
-                    <CheckCircle2 size={14} />
-                  ) : (
-                    s.num
-                  )}
+                  <img src={iconSrc} alt={s.name} className="w-full h-full object-contain" />
                 </div>
                 <span
                   className={cn(
-                    "text-[10px] uppercase font-bold tracking-wider scale-75 origin-top mt-1",
+                    "text-[10px] uppercase font-bold tracking-wider scale-75 origin-top",
                     isActive
                       ? "text-cyan-400"
                       : "text-slate-600",
@@ -3024,7 +3966,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                       {selectedAudioUrl ? (
                         "selected..."
                       ) : (
-                        (isUploadingSuperIpAudio ? "上传中..." : "上传音频")
+                        (isUploadingSuperIpAudio ? t("superip.panel.uploading") : t("superip.panel.upload_audio"))
                       )}
                     </span>
                   </div>
@@ -3088,7 +4030,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                     <>
                       <Film size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
                       <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
-                        视频生成
+                        {t("superip.panel.video_gen")}
                       </span>
                     </>
                   )}
@@ -3097,7 +4039,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                 <div className="flex flex-col items-center">
                   <button
                     type="button"
-                    onClick={() => startSuperIpGen('default')}
+                    onClick={() => startSuperIpGen(isSendIconPink ? 'pro' : 'default')}
                     disabled={superIpTasks[0]?.status === 'processing'}
                     className={cn(
                       "transition-all p-1",
@@ -3116,6 +4058,21 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                       )}
                     />
                   </button>
+
+                  {(() => {
+                    const d = isSendIconPink ? creditsCheckGenPro : creditsCheckGenCom;
+                    if (!(typeof d?.required_credits === "number") || (d?.required_credits ?? 0) <= 0) return null;
+                    const loading = isSendIconPink ? creditsCheckLoadingGenPro : creditsCheckLoadingGenCom;
+                    const color = isSendIconPink ? "text-[#A10B6A]" : "text-cyan-300";
+                    return (
+                    <div className="mt-0.5 text-[9px] text-cyan-300 font-semibold tabular-nums flex items-center gap-1">
+                      <span className={color}>{d!.required_credits} credits</span>
+                      {loading ? (
+                        <span className={cn("w-3 h-3 border-2 border-t-transparent rounded-full animate-spin", isSendIconPink ? "border-[#A10B6A]" : "border-cyan-300")} />
+                      ) : null}
+                    </div>
+                    );
+                  })()}
 
                   {/* Switch + Pro: directly under the Send (paper-plane) icon */}
                   <button
@@ -3142,7 +4099,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
               className="w-full py-2 border border-slate-700 rounded-lg bg-slate-950/30 text-slate-400 text-[10px] flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors cursor-pointer hover:text-cyan-400 hover:border-cyan-500/50 group"
             >
               <ImageIcon size={14} className="group-hover:text-cyan-400 transition-colors" />
-              <span className="font-medium group-hover:text-cyan-400 transition-colors">打开图库</span>
+              <span className="font-medium group-hover:text-cyan-400 transition-colors">{t("superip.panel.open_gallery")}</span>
             </button>
 
             {/* Workbench Input */}
@@ -3183,7 +4140,19 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                     </>
                   ) : (
                     <>
-                      <Zap size={14} /> Generate
+                      <Zap size={14} />
+                      <span>
+                        Generate
+                          {typeof creditsCheckImage?.required_credits === "number" && creditsCheckImage.required_credits > 0
+                            ? ` (${creditsCheckImage.required_credits} credits)`
+                            : ""}
+                      </span>
+                      {creditsCheckLoadingImage ? (
+                        <span
+                          className="ml-1 w-3 h-3 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"
+                          aria-label="Checking credits"
+                        />
+                      ) : null}
                     </>
                   )}
                 </button>
@@ -3195,7 +4164,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
               <div className="bg-slate-900/40 border border-slate-800 rounded-xl min-h-[240px] max-h-[400px] p-2 flex flex-col">
                 <div className="flex justify-between items-center mb-2 px-2">
                   <span className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
-                    Result
+                    {t("common.result")}
                   </span>
                 </div>
                 <div className="flex-1 rounded-lg bg-black/50 overflow-hidden relative group border border-slate-800 flex items-center justify-center">
@@ -3213,9 +4182,12 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                 </p>
               </div>
             ) : (
-              <div className="bg-slate-900/40 border border-slate-800 rounded-xl min-h-[240px] flex items-center justify-center p-6 text-center">
+              <div className="bg-slate-900/40 border border-slate-800 rounded-xl min-h-[240px] flex flex-col items-center justify-center p-6 text-center gap-2">
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                  {t("common.result")}
+                </h3>
                 <p className="text-[10px] text-slate-500 font-medium">
-                  Generated image will appear here
+                  {t("superip.generated_placeholder")}
                 </p>
               </div>
             )}
@@ -3303,7 +4275,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                       {selectedAudioUrl ? (
                         "selected..."
                       ) : (
-                        (isUploadingSuperIpAudio ? "上传中..." : "上传音频")
+                        (isUploadingSuperIpAudio ? t("superip.panel.uploading") : t("superip.panel.upload_audio"))
                       )}
                     </span>
                   </div>
@@ -3368,7 +4340,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                     <>
                       <Film size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
                       <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
-                        视频生成
+                        {t("superip.panel.video_gen")}
                       </span>
                     </>
                   )}
@@ -3378,7 +4350,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                   {/* Send Icon Button */}
                   <button
                     type="button"
-                    onClick={() => startSuperIpGen('default')}
+                    onClick={() => startSuperIpGen(isSendIconPink ? 'pro' : 'default')}
                     disabled={superIpTasks[0]?.status === 'processing'}
                     className={cn(
                       "transition-all p-1",
@@ -3397,6 +4369,21 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                       )}
                     />
                   </button>
+
+                  {(() => {
+                    const d = isSendIconPink ? creditsCheckGenPro : creditsCheckGenCom;
+                    if (!(typeof d?.required_credits === "number") || (d?.required_credits ?? 0) <= 0) return null;
+                    const loading = isSendIconPink ? creditsCheckLoadingGenPro : creditsCheckLoadingGenCom;
+                    const color = isSendIconPink ? "text-[#A10B6A]" : "text-cyan-300";
+                    return (
+                    <div className="mt-0.5 text-[9px] text-cyan-300 font-semibold tabular-nums flex items-center gap-1">
+                      <span className={color}>{d!.required_credits} credits</span>
+                      {loading ? (
+                        <span className={cn("w-3 h-3 border-2 border-t-transparent rounded-full animate-spin", isSendIconPink ? "border-[#A10B6A]" : "border-cyan-300")} />
+                      ) : null}
+                    </div>
+                    );
+                  })()}
 
                   {/* Switch + Pro/Com (match CHAR behavior) */}
                   <button
@@ -3444,7 +4431,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
             <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 space-y-4">
               {/* Voice Waveform - 显示区域，不是输入框 */}
               <div className="space-y-2">
-                <label className="ui-tiny uppercase text-slate-400 font-bold">
+                <label className="text-[9px] uppercase text-slate-400 font-bold">
                   Voice Waveform
                 </label>
                 <div className="flex gap-2 items-center">
@@ -3555,7 +4542,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
 
               {/* Select Voice */}
               <div className="space-y-2">
-                <label className="ui-tiny uppercase text-slate-400 font-bold">
+                <label className="text-[9px] uppercase text-slate-400 font-bold">
                   Select Voice
                 </label>
                 <button
@@ -3598,7 +4585,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
 
               {/* Voice Cloning */}
               <div className="space-y-2">
-                <label className="ui-tiny uppercase text-slate-400 font-bold">
+                <label className="text-[9px] uppercase text-slate-400 font-bold">
                   Voice Cloning
                 </label>
                 <input
@@ -3633,7 +4620,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                         {cloneFileId ? (
                           <Volume2 size={16} className="text-slate-300" />
                         ) : (
-                          <Upload size={16} className="text-slate-500 group-hover:text-cyan-400 transition-colors" />
+                          <img src="/clone.svg" alt="Upload" className="w-8 h-8 opacity-80 group-hover:opacity-100 transition-opacity" />
                         )}
                       </div>
                       <div className="min-w-0 flex-1">
@@ -3794,7 +4781,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
 
               {/* Input Text */}
               <div className="space-y-2">
-                <label className="ui-tiny uppercase text-slate-400 font-bold">
+                <label className="text-[9px] uppercase text-slate-400 font-bold">
                   Input Text
                 </label>
                 <div className="relative group">
@@ -3846,7 +4833,19 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                   onClick={handleGenerateVoice}
                   disabled={isGenerating}
                 >
-                  <Zap size={14} /> Generate
+                  <Zap size={14} />
+                  <span>
+                    Generate
+                    {typeof creditsCheckVoice?.required_credits === "number" && creditsCheckVoice.required_credits > 0
+                      ? ` (${creditsCheckVoice.required_credits} credits)`
+                      : ""}
+                  </span>
+                  {creditsCheckLoadingVoice ? (
+                    <span
+                      className="ml-1 w-3 h-3 border-2 border-cyan-300 border-t-transparent rounded-full animate-spin"
+                      aria-label="Checking credits"
+                    />
+                  ) : null}
                 </NeonButton>
               </div>
             </div>
@@ -4003,7 +5002,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                       {selectedAudioUrl ? (
                         "selected..."
                       ) : (
-                        isUploadingSuperIpAudio ? "上传中..." : "上传音频"
+                        isUploadingSuperIpAudio ? t("superip.panel.uploading") : t("superip.panel.upload_audio")
                       )}
                     </span>
                   </div>
@@ -4068,7 +5067,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                     <>
                       <Film size={18} className="text-slate-600 group-hover:text-cyan-400 transition-colors" />
                       <span className="text-[9px] text-slate-500 group-hover:text-cyan-400 transition-colors font-medium text-center leading-tight whitespace-nowrap">
-                        视频生成
+                        {t("superip.panel.video_gen")}
                       </span>
                     </>
                   )}
@@ -4080,13 +5079,24 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                     className={cn(
                       "transition-all p-1",
                       !isSendIconPink && "text-cyan-400 hover:text-cyan-300",
+                      (!isSendIconPink &&
+                        (creditsCheckGenCom?.allowed === false || !(typeof selectedAudioDurationSec === 'number' && selectedAudioDurationSec > 0))) &&
+                        "opacity-50 cursor-not-allowed",
                     )}
                     type="button"
                     aria-label="Send"
                     onClick={() => {
                       // Pink => Pro line (Wavespeed). Cyan => Com line (RunningHub).
-                      if (isSendIconPink) startWavespeedPro({ source: "send-icon" });
-                      else startSuperIpGen("custom");
+                      if (!isSendIconPink && !(typeof selectedAudioDurationSec === 'number' && selectedAudioDurationSec > 0)) {
+                        alert('无法获取音频时长，任务无法执行。请重新上传音频或选择可访问的音频链接。');
+                        return;
+                      }
+                      if (!isSendIconPink && creditsCheckGenCom?.allowed === false) {
+                        alert("积分不足或需要升级套餐");
+                        return;
+                      }
+                      if (isSendIconPink) startSuperIpGen('pro');
+                      else startSuperIpGen('custom');
                     }}
                   >
                     <Send
@@ -4098,6 +5108,21 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                       )}
                     />
                   </button>
+
+                  {(() => {
+                    const d = isSendIconPink ? creditsCheckGenPro : creditsCheckGenCom;
+                    if (!(typeof d?.required_credits === "number") || (d?.required_credits ?? 0) <= 0) return null;
+                    const loading = isSendIconPink ? creditsCheckLoadingGenPro : creditsCheckLoadingGenCom;
+                    const color = isSendIconPink ? "text-[#A10B6A]" : "text-cyan-300";
+                    return (
+                    <div className="mt-0.5 text-[9px] text-cyan-300 font-semibold tabular-nums flex items-center gap-1">
+                      <span className={color}>{d!.required_credits} credits</span>
+                      {loading ? (
+                        <span className={cn("w-3 h-3 border-2 border-t-transparent rounded-full animate-spin", isSendIconPink ? "border-[#A10B6A]" : "border-cyan-300")} />
+                      ) : null}
+                    </div>
+                    );
+                  })()}
 
                   <button
                     onClick={() => {
@@ -4150,14 +5175,21 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                   {/* Left: Generate */}
                   <button
                     type="button"
-                    disabled={superIpTasks[0]?.status === 'processing'}
+                    disabled={
+                      superIpTasks[0]?.status === 'processing' ||
+                      creditsCheckGenCom?.allowed === false ||
+                      !(typeof selectedAudioDurationSec === 'number' && selectedAudioDurationSec > 0)
+                    }
                     onClick={() => startSuperIpGen('custom')}
                     className={cn(
                       "flex-1 bg-slate-950/90 hover:bg-slate-800 transition-colors relative z-10",
                       "border border-cyan-500/50 border-r-0 rounded-l-lg", // Standard rounded corners
                       "text-cyan-400 text-[10px] font-bold uppercase tracking-wider",
-                      "flex items-center justify-center gap-2 pr-3",
-                      (superIpTasks[0]?.status === 'processing') && "opacity-50 cursor-not-allowed"
+                      "flex items-center justify-center pr-3",
+                      ((superIpTasks[0]?.status === 'processing') ||
+                        creditsCheckGenCom?.allowed === false ||
+                        !(typeof selectedAudioDurationSec === 'number' && selectedAudioDurationSec > 0)) &&
+                        "opacity-50 cursor-not-allowed"
                     )}
                     style={{ 
                       clipPath: "polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0 100%)",
@@ -4165,8 +5197,15 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                       borderBottomLeftRadius: "0.5rem"
                     }}
                   >
-                    <Zap size={14} className="text-cyan-400" />
-                    Generate
+                    <span>
+                      Generate
+                      {typeof creditsCheckGenCom?.required_credits === "number" && creditsCheckGenCom.required_credits > 0
+                        ? ` (${creditsCheckGenCom.required_credits} credits)`
+                        : ""}
+                    </span>
+                    {creditsCheckLoadingGenCom ? (
+                      <span className="w-3 h-3 border-2 border-cyan-300 border-t-transparent rounded-full animate-spin" />
+                    ) : null}
                   </button>
 
                   {/* Gap Borders (Blue Lines) - Single skewed div with side borders */}
@@ -4178,14 +5217,21 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                   {/* Right: Pro */}
                   <button
                     type="button"
-                    onClick={() => {
-                      startWavespeedPro({ source: 'gen-pro' });
-                    }}
+                    disabled={
+                      superIpTasks[0]?.status === 'processing' ||
+                      creditsCheckGenPro?.allowed === false ||
+                      !(typeof selectedAudioDurationSec === 'number' && selectedAudioDurationSec > 0)
+                    }
+                    onClick={() => startSuperIpGen('pro')}
                     className={cn(
                       "w-24 bg-slate-950/90 hover:bg-slate-800 transition-colors relative z-10 shrink-0",
                       "border border-cyan-500/50 border-l-0 rounded-r-lg", // Standard rounded corners
                       "text-[#A10B6A] text-[10px] font-bold uppercase tracking-wider",
-                      "flex items-center justify-center pl-4"
+                      "flex items-center justify-center pl-4",
+                      ((superIpTasks[0]?.status === 'processing') ||
+                        creditsCheckGenPro?.allowed === false ||
+                        !(typeof selectedAudioDurationSec === 'number' && selectedAudioDurationSec > 0)) &&
+                        "opacity-50 cursor-not-allowed"
                     )}
                     style={{ 
                       clipPath: "polygon(12px 0, 100% 0, 100% 100%, 0 100%)",
@@ -4193,7 +5239,15 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                       borderBottomRightRadius: "0.5rem"
                     }}
                   >
-                    Pro
+                    <span>
+                      Pro
+                      {typeof creditsCheckGenPro?.required_credits === "number" && creditsCheckGenPro.required_credits > 0
+                        ? ` (${creditsCheckGenPro.required_credits} credits)`
+                        : ""}
+                    </span>
+                    {creditsCheckLoadingGenPro ? (
+                      <span className="ml-2 w-3 h-3 border-2 border-[#A10B6A] border-t-transparent rounded-full animate-spin" />
+                    ) : null}
                   </button>
 
                   {/* SVG Overlay for Perfect Borders - Z-50 ensures visibility */}
@@ -4330,7 +5384,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
           <NeonButton
             variant="secondary"
             onClick={() => setStep((s) => s - 1)}
-            className="flex-1"
+            className="flex-1 py-2"
           >
             Back
           </NeonButton>
@@ -4340,7 +5394,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
           onClick={() =>
             step < 3 ? setStep((s) => s + 1) : setStep(1)
           }
-          className="flex-[2]"
+          className="flex-[2] py-2"
         >
           {step === 3 ? "Start New" : "Next Step"}
         </NeonButton>
@@ -4399,11 +5453,11 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                     <p className="text-xs text-slate-400 font-medium">加载中...</p>
                   </div>
                 ) : galleryImages.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-20">
-                    <div className="w-16 h-16 rounded-full bg-slate-800/30 flex items-center justify-center mb-3">
+                  <div className="flex flex-col items-center justify-center pt-28 pb-20">
+                    <div className="w-16 h-16 rounded-full bg-slate-800/30 flex items-center justify-center">
                       <ImageIcon size={28} className="text-slate-600" />
                     </div>
-                    <p className="text-sm text-slate-400 font-medium mb-1">暂无历史图片</p>
+                    <p className="text-sm text-slate-600 font-medium -mt-1">暂无历史图片</p>
                     <p className="text-xs text-slate-600">生成图片后会显示在这里</p>
                   </div>
                 ) : (
@@ -4436,17 +5490,6 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                     ))}
                   </div>
                 )}
-              </div>
-              
-              {/* Bottom Close Button - 明显的退出按钮 */}
-              <div className="flex-shrink-0 p-3 bg-slate-950/80 border-t border-slate-800/50">
-                <button
-                  onClick={() => setShowGallery(false)}
-                  className="w-full py-3 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white font-medium text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
-                >
-                  <X size={18} />
-                  关闭图库
-                </button>
               </div>
             </motion.div>
           </>
@@ -4801,6 +5844,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
 
 // 4. History Page
 const HistoryView = () => {
+    const { t } = useContext(LanguageContext);
   type HistoryContentType = "image" | "video" | "audio";
 
   type HistoryRecord = {
@@ -4816,10 +5860,10 @@ const HistoryView = () => {
   };
 
   const filters: Array<{ label: string; value: "all" | HistoryContentType }> = [
-    { label: "All", value: "all" },
-    { label: "Video", value: "video" },
-    { label: "Image", value: "image" },
-    { label: "Audio", value: "audio" },
+    { label: t("history.filter.all"), value: "all" },
+    { label: t("history.filter.video"), value: "video" },
+    { label: t("history.filter.image"), value: "image" },
+    { label: t("history.filter.audio"), value: "audio" },
   ];
 
   const [activeFilter, setActiveFilter] = useState<
@@ -5165,7 +6209,7 @@ const HistoryView = () => {
     <div className="flex flex-col h-full pb-24 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <header className="mb-4">
         <h1 className="text-2xl font-black text-white tracking-tight uppercase">
-          History
+          {t("history.title")}
         </h1>
       </header>
 
@@ -5178,11 +6222,15 @@ const HistoryView = () => {
           <button
             key={f.value}
             onClick={() => setActiveFilter(f.value)}
+            style={isActive ? {
+              backgroundColor: '#fcf2b9ff',
+              borderColor: '#FFD700',
+              color: '#000000',
+              boxShadow: '0 0 15px rgba(255, 215, 0, 0.5)'
+            } : undefined}
             className={cn(
               "px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap transition-all border",
-              isActive
-                ? "bg-fuchsia-500/10 border-fuchsia-500 text-fuchsia-400 shadow-[0_0_10px_rgba(192,38,211,0.2)]"
-                : "bg-slate-900/50 border-slate-800 text-slate-500 hover:border-slate-700 hover:text-slate-400",
+              !isActive && "bg-slate-900/50 border-slate-800 text-slate-500 hover:border-slate-700 hover:text-slate-400",
             )}
           >
             {f.label}
@@ -5196,11 +6244,11 @@ const HistoryView = () => {
       <div className="space-y-4 overflow-y-auto">
         {loadingHistory ? (
           <div className="py-10 text-center text-slate-500 text-[10px] font-medium">
-            Loading...
+            {t("history.loading")}
           </div>
         ) : historyRecords.length === 0 ? (
           <div className="py-10 text-center text-slate-500 text-[10px] font-medium">
-            No history
+            {t("history.empty")}
           </div>
         ) : (
           historyRecords.map((record) => {
@@ -5485,6 +6533,7 @@ const ScriptsView = ({
   onUnauthorized: () => void;
   onNavigate: (tab: string) => void;
 }) => {
+  const { t } = useContext(LanguageContext);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const rewriteFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -5534,17 +6583,17 @@ const ScriptsView = ({
   const modes = [
     {
       id: "extract",
-      label: "Extract",
+      label: t("video_insights.mode.extract"),
       icon: Zap,
     },
     {
       id: "scene",
-      label: "Scene",
+      label: t("video_insights.mode.scene"),
       icon: Film,
     },
     {
       id: "rewrite",
-      label: "Rewrite",
+      label: t("video_insights.mode.rewrite"),
       icon: PenTool,
     },
   ];
@@ -5732,10 +6781,10 @@ const ScriptsView = ({
     <div className="flex flex-col h-full pb-24 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <header className="mb-6">
         <h1 className="text-xl font-black text-white tracking-tight uppercase">
-          Video Insights
+          {t("video_insights.title")}
         </h1>
         <p className="text-slate-400 text-xs mt-1">
-          Choose a goal to get actionable insights fast.
+          {t("video_insights.desc")}
         </p>
       </header>
 
@@ -5793,18 +6842,18 @@ const ScriptsView = ({
             <div className="space-y-4">
               <div className="space-y-2">
                 <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                  Original Script
+                  {t("video_insights.input.script")}
                 </label>
                 <textarea
                   value={rewriteText}
                   onChange={(e) => setRewriteText(e.target.value)}
                   className="w-full h-32 bg-slate-950 border border-slate-700 rounded-lg p-3 text-[10px] text-white resize-none focus:border-fuchsia-500 outline-none placeholder:text-slate-600 transition-all"
-                  placeholder="Enter the script content you want to rewrite..."
+                  placeholder={t("video_insights.placeholder.script")}
                 />
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                  Reference Visual (Optional)
+                  {t("video_insights.input.visual")}
                 </label>
                 <div
                   onClick={() => !rewriteImageFile && rewriteFileInputRef.current?.click()}
@@ -5837,7 +6886,7 @@ const ScriptsView = ({
                     <div className="flex items-center gap-2 text-slate-500">
                       <Upload size={16} />
                       <span className="text-[10px]">
-                        Upload Image
+                        {t("video_insights.upload.image_btn")}
                       </span>
                     </div>
                   )}
@@ -5896,7 +6945,7 @@ const ScriptsView = ({
                       />
                     </div>
                     <p className="text-slate-400 text-[10px] font-medium">
-                      Drag & drop or click to upload
+                      {t("video_insights.upload.placeholder")}
                     </p>
                   </>
                 )}
@@ -5915,7 +6964,7 @@ const ScriptsView = ({
                 </div>
                 <div className="relative flex justify-center text-[10px] uppercase">
                   <span className="bg-slate-950 px-2 text-slate-500 font-bold tracking-wider">
-                    Or paste link
+                    {t("video_insights.upload.paste_link")}
                   </span>
                 </div>
               </div>
@@ -5934,7 +6983,7 @@ const ScriptsView = ({
                       setVideoUrl(e.target.value);
                       if (e.target.value) setUploadedFile(null);
                     }}
-                    placeholder="Paste video link (TikTok supported)"
+                    placeholder={t("video_insights.upload.link_placeholder")}
                     className="w-full bg-slate-950 border border-slate-700 text-white pl-10 pr-4 py-2.5 rounded-lg text-[10px] outline-none focus:border-fuchsia-500 focus:shadow-[0_0_15px_rgba(192,38,211,0.2)] transition-all placeholder:text-slate-600"
                   />
                 </div>
@@ -5948,7 +6997,7 @@ const ScriptsView = ({
           <NeonButton
             onClick={handleAnalyze}
             className={cn(
-              "bg-gradient-to-r from-fuchsia-600 to-pink-600 border-fuchsia-500/50 shadow-[0_0_20px_rgba(192,38,211,0.3)] w-full",
+              "bg-gradient-to-r from-fuchsia-600 to-pink-600 border-fuchsia-500/50 shadow-[0_0_20px_rgba(192,38,211,0.3)] w-full py-3 text-xs",
               (!canRun || dailyUsageLoading) && "opacity-50 cursor-not-allowed"
             )}
             disabled={!canRun || dailyUsageLoading}
@@ -5956,7 +7005,7 @@ const ScriptsView = ({
             {loading ? (
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                <span>Processing...</span>
+                <span>{t("video_insights.status.processing")}</span>
               </div>
             ) : (
               <>
@@ -5967,8 +7016,8 @@ const ScriptsView = ({
                 )}
                 <span>
                   {activeMode === "rewrite"
-                    ? "Rewrite Script"
-                    : "Analyze Video"}
+                    ? t("video_insights.btn.rewrite")
+                    : t("video_insights.btn.analyze")}
                   {isFreeTier && dailyUsageInitialized ? (
                     <span className="ml-2 text-[10px] text-white/80 font-semibold">
                       ({remaining}/{limit})
@@ -5981,7 +7030,7 @@ const ScriptsView = ({
 
           {isFreeTier && dailyUsageInitialized && isOutOfQuota ? (
             <div className="mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] leading-relaxed">
-              Youve reached todays free limit for this mode. Upgrade to continue.
+              {t("video_insights.limit_reached")}
             </div>
           ) : null}
         </div>
@@ -5990,7 +7039,7 @@ const ScriptsView = ({
         <div className="mt-8 border-t border-slate-800 pt-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-xs uppercase tracking-widest text-slate-500 font-bold">
-              Results
+              {t("video_insights.results")}
             </h3>
             {result && (
               <button
@@ -5998,7 +7047,7 @@ const ScriptsView = ({
                 className="text-[10px] text-fuchsia-400 font-bold uppercase hover:text-fuchsia-300 flex items-center gap-1"
               >
                 <Check size={12} />
-                Copy
+                {t("common.copy")}
               </button>
             )}
           </div>
@@ -6026,7 +7075,7 @@ const ScriptsView = ({
                   <Bot size={24} className="text-slate-700" />
                 </div>
                 <span className="text-slate-500 text-sm">
-                  Results will appear here
+                  {t("video_insights.results_placeholder")}
                 </span>
               </>
             )}
@@ -6037,7 +7086,7 @@ const ScriptsView = ({
                   onClick={handleClearResult}
                   className="px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-[9px] font-bold text-slate-400 hover:text-white hover:border-slate-600 transition-all uppercase tracking-wider shadow-lg"
                 >
-                  Clear
+                  {t("common.clear")}
                 </button>
               </div>
             )}
@@ -7408,131 +8457,204 @@ const ProfileView = ({
   isLoggedIn: boolean;
   onLogout: () => void;
   user: UserProfile | null;
-}) => (
-  <div className="flex flex-col h-full pb-24 animate-in fade-in slide-in-from-bottom-4 duration-500">
-    <header className="mb-8 flex flex-col items-center pt-4">
-      {isLoggedIn && user ? (
-        <>
-          <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-cyan-500 to-purple-600 p-[2px] mb-4 shadow-[0_0_20px_rgba(192,38,211,0.3)]">
-            <div className="w-full h-full rounded-full bg-slate-950 flex items-center justify-center overflow-hidden">
-              <img
-                src="https://images.unsplash.com/photo-1585732436636-f786c52696d6?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjeWJlcnB1bmslMjBwb3J0cmFpdHxlbnwxfHx8fDE3NjYwNDI5MDB8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
-                alt="User"
-                className="w-full h-full object-cover"
-              />
+}) => {
+  const { t, lang, setLang } = useTranslation();
+  const [showLanguageModal, setShowLanguageModal] = useState(false);
+
+  const availableLanguages: { code: LangKey; label: string }[] = [
+    { code: "en", label: "English" },
+    { code: "zh", label: "Chinese" },
+    { code: "zh-TW", label: "Traditional Chinese" },
+    { code: "ja", label: "Japanese" },
+    { code: "es", label: "Spanish" },
+  ];
+
+  return (
+    <div className="flex flex-col h-full pb-24 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className={clsx("transition-all duration-300", showLanguageModal && "blur-sm brightness-50 pointer-events-none select-none")}>
+      <header className="mb-8 flex flex-col items-center pt-4">
+        {isLoggedIn && user ? (
+          <>
+            <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-cyan-500 to-purple-600 p-[2px] mb-4 shadow-[0_0_20px_rgba(192,38,211,0.3)]">
+              <div className="w-full h-full rounded-full bg-slate-950 flex items-center justify-center overflow-hidden">
+                <img
+                  src="https://images.unsplash.com/photo-1585732436636-f786c52696d6?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjeWJlcnB1bmslMjBwb3J0cmFpdHxlbnwxfHx8fDE3NjYwNDI5MDB8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
+                  alt="User"
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            </div>
+            <h1 className="text-2xl font-black text-white tracking-tight">{user.username}</h1>
+            {user.email ? (
+              <p className="text-slate-400 text-sm">{user.email}</p>
+            ) : null}
+          </>
+        ) : (
+          <div className="w-full px-4 text-center">
+            <h1 className="text-xl font-black text-white tracking-tight mb-2">{t("profile.title")}</h1>
+            <p className="text-slate-400 text-sm">{t("profile.login_desc")}</p>
+            <div className="mt-4 flex justify-center">
+              <button
+                onClick={() => onNavigate("login")}
+                className="px-4 py-2 rounded-md bg-cyan-600 text-white border border-cyan-400/50 hover:bg-cyan-500 text-sm"
+              >
+                {t("common.login")}
+              </button>
             </div>
           </div>
-          <h1 className="text-2xl font-black text-white tracking-tight">{user.username}</h1>
-          {user.email ? (
-            <p className="text-slate-400 text-sm">{user.email}</p>
-          ) : null}
-        </>
-      ) : (
-        <div className="w-full px-4 text-center">
-          <h1 className="text-xl font-black text-white tracking-tight mb-2">个人中心</h1>
-          <p className="text-slate-400 text-sm">未登录，登录后可查看个人资料与设置</p>
-          <div className="mt-4 flex justify-center">
+        )}
+      </header>
+
+      <div className="space-y-6 px-2">
+        <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex justify-between items-center relative overflow-hidden group">
+          <div className="absolute inset-0 bg-gradient-to-r from-fuchsia-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="flex items-center gap-3 relative z-10">
+            <div className="p-2.5 bg-fuchsia-500/10 rounded-lg text-fuchsia-400 border border-fuchsia-500/20">
+              <Zap size={20} />
+            </div>
+            <div>
+              <div className="text-white font-bold">{t("profile.membership") || "Credits"}</div>
+              <div className="text-xs text-slate-500">
+                {user?.tier ? user.tier : "—"}
+              </div>
+            </div>
+          </div>
+          <div className="text-right relative z-10">
+            <span className="text-2xl font-black text-white block">
+              {typeof user?.credits === "number"
+                ? user.credits.toLocaleString()
+                : "—"}
+            </span>
             <button
-              onClick={() => onNavigate("login")}
-              className="px-4 py-2 rounded-md bg-cyan-600 text-white border border-cyan-400/50 hover:bg-cyan-500 text-sm"
+              onClick={() => onNavigate("credits_usage")}
+              className="text-[10px] text-fuchsia-400 font-bold uppercase hover:text-fuchsia-300"
             >
-              去登录
+              {t("profile.top_up")}
             </button>
           </div>
         </div>
-      )}
-    </header>
 
-    <div className="space-y-6 px-2">
-      <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex justify-between items-center relative overflow-hidden group">
-        <div className="absolute inset-0 bg-gradient-to-r from-fuchsia-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-        <div className="flex items-center gap-3 relative z-10">
-          <div className="p-2.5 bg-fuchsia-500/10 rounded-lg text-fuchsia-400 border border-fuchsia-500/20">
-            <Zap size={20} />
-          </div>
-          <div>
-            <div className="text-white font-bold">Credits</div>
-            <div className="text-xs text-slate-500">
-              {user?.tier ? user.tier : "—"}
-            </div>
-          </div>
+        <div className="space-y-1">
+          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest px-2 mb-2">
+            {t("profile.settings_header")}
+          </h3>
+          {[
+            {
+              label: t("profile.menu.partner"),
+              icon: Users,
+              id: "partner_program",
+            },
+            {
+              label: t("profile.settings.language"),
+              icon: Globe,
+              action: () => setShowLanguageModal(true),
+              value: availableLanguages.find(l => l.code === lang)?.label,
+            },
+            {
+              label: t("profile.menu.billing"),
+              icon: CreditCard,
+              id: "billing",
+            },
+            {
+              label: t("profile.menu.usage"),
+              icon: BarChart3,
+              id: "credits_usage",
+            },
+            {
+              label: t("settings.support") || "Help & Support",
+              icon: HelpCircle,
+              id: "support",
+            },
+          ].map((item: any) => (
+            <button
+              key={item.label}
+              onClick={() => item.action ? item.action() : (item.id && onNavigate(item.id))}
+              className="w-full flex items-center justify-between p-4 rounded-xl hover:bg-slate-900 border border-transparent hover:border-slate-800 transition-all group"
+            >
+              <div className="flex items-center gap-3">
+                <item.icon
+                  size={18}
+                  className="text-slate-500 group-hover:text-cyan-400 transition-colors"
+                />
+                <span className="text-slate-300 group-hover:text-white font-medium">
+                  {item.label}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {item.value && (
+                  <span className="text-xs text-slate-500 font-medium">{item.value}</span>
+                )}
+                <ChevronRight
+                  size={16}
+                  className="text-slate-600 group-hover:text-slate-400"
+                />
+              </div>
+            </button>
+          ))}
         </div>
-        <div className="text-right relative z-10">
-          <span className="text-2xl font-black text-white block">
-            {typeof user?.credits === "number"
-              ? user.credits.toLocaleString()
-              : "—"}
-          </span>
-          <button
-            onClick={() => onNavigate("credits_usage")}
-            className="text-[10px] text-fuchsia-400 font-bold uppercase hover:text-fuchsia-300"
-          >
-            Top Up
-          </button>
+
+        <div className="pt-4">
+          {isLoggedIn && (
+            <button
+              onClick={onLogout}
+              className="w-full py-3 rounded-xl border border-red-500/30 text-red-500 bg-red-500/5 hover:bg-red-500/10 hover:border-red-500/50 transition-all font-bold text-sm"
+            >
+              {t("profile.logout")}
+            </button>
+          )}
         </div>
-      </div>
-
-      <div className="space-y-1">
-        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest px-2 mb-2">
-          Settings
-        </h3>
-        {[
-          {
-            label: "Partner Program",
-            icon: Users,
-            id: "partner_program",
-          },
-          {
-            label: "Billing & Plans",
-            icon: CreditCard,
-            id: "billing",
-          },
-          {
-            label: "Credits & Usage",
-            icon: BarChart3,
-            id: "credits_usage",
-          },
-          {
-            label: "Help & Support",
-            icon: HelpCircle,
-            id: "support",
-          },
-        ].map((item) => (
-          <button
-            key={item.label}
-            onClick={() => item.id && onNavigate(item.id)}
-            className="w-full flex items-center justify-between p-4 rounded-xl hover:bg-slate-900 border border-transparent hover:border-slate-800 transition-all group"
-          >
-            <div className="flex items-center gap-3">
-              <item.icon
-                size={18}
-                className="text-slate-500 group-hover:text-cyan-400 transition-colors"
-              />
-              <span className="text-slate-300 group-hover:text-white font-medium">
-                {item.label}
-              </span>
-            </div>
-            <ChevronRight
-              size={16}
-              className="text-slate-600 group-hover:text-slate-400"
-            />
-          </button>
-        ))}
-      </div>
-
-      <div className="pt-4">
-        {isLoggedIn && (
-          <button
-            onClick={onLogout}
-            className="w-full py-3 rounded-xl border border-red-500/30 text-red-500 bg-red-500/5 hover:bg-red-500/10 hover:border-red-500/50 transition-all font-bold text-sm"
-          >
-            Log Out
-          </button>
-        )}
       </div>
     </div>
-  </div>
-);
+
+      {showLanguageModal && createPortal(
+        <div 
+          className="fixed inset-0 flex items-center justify-center p-4 bg-black/40 safe-area-bottom"
+          style={{ zIndex: 9999999 }}
+        >
+          <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="w-full max-w-sm bg-slate-950/80 backdrop-blur-2xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl relative z-10"
+          >
+            <div className="p-5 border-b border-white/5 flex items-center justify-between">
+              <h3 className="font-bold text-white flex items-center gap-2.5 text-lg">
+                <Globe size={20} className="text-cyan-400" />
+                {t("modal.language.title")}
+              </h3>
+              <button 
+                onClick={() => setShowLanguageModal(false)}
+                className="p-2 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-3 space-y-2 max-h-[60vh] overflow-y-auto">
+              {availableLanguages.map((l) => (
+                <button
+                  key={l.code}
+                  onClick={() => {
+                    setLang(l.code);
+                    setShowLanguageModal(false);
+                  }}
+                  className={clsx(
+                    "w-full flex items-center justify-between p-4 rounded-2xl transition-all font-medium",
+                    lang === l.code 
+                      ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-[0_0_15px_rgba(6,182,212,0.1)]" 
+                      : "hover:bg-white/5 text-slate-400 border border-transparent"
+                  )}
+                >
+                  <span className="text-base">{l.label}</span>
+                  {lang === l.code && <Check size={18} className="text-cyan-400" />}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+};
 
 // --- Main Layout & App ---
 
@@ -7543,12 +8665,13 @@ const BottomNav = ({
   activeTab: string;
   onChange: (t: string) => void;
 }) => {
+  const { t } = useTranslation();
   const tabs = [
-    { id: "workspace", icon: LayoutGrid, label: "Workspace" },
-    { id: "scripts", icon: Bot, label: "Scripts" },
-    { id: "hypersell", icon: Video, label: "HyperSell" },
-    { id: "superip", icon: User, label: "Super IP" },
-    { id: "history", icon: History, label: "History" },
+    { id: "workspace", icon: LayoutGrid, label: t("nav.workspace") },
+    { id: "scripts", icon: Bot, label: t("nav.scripts") },
+    { id: "hypersell", icon: Video, label: t("nav.hypersell") },
+    { id: "superip", icon: User, label: t("nav.superip") },
+    { id: "history", icon: History, label: t("nav.history") },
   ];
 
   return (
@@ -7603,6 +8726,20 @@ const BottomNav = ({
 };
 
 export default function App() {
+  const [lang, setLang] = useState<LangKey>(() => {
+    try {
+      const saved = localStorage.getItem("app_lang");
+      return (saved && saved in translations) ? (saved as LangKey) : "en";
+    } catch { return "en"; }
+  });
+
+  const handleSetLang = (l: LangKey) => {
+    setLang(l);
+    localStorage.setItem("app_lang", l);
+  };
+
+  const t = (key: string) => translations[lang]?.[key] || translations["en"][key] || key;
+
   const [activeTab, setActiveTab] = useState("workspace");
   const [token, setToken] = useState<string | null>(() => localStorage.getItem("access_token"));
   const isLoggedIn = !!token;
@@ -7862,16 +8999,19 @@ export default function App() {
   }, [token, user?.tier]);
 
   return (
+    <LanguageContext.Provider value={{ lang, setLang: handleSetLang, t }}>
     <div className="app-fullscreen bg-slate-950 text-slate-200 font-sans selection:bg-cyan-500/30 selection:text-cyan-100 flex justify-center">
       {/* Mobile Container Simulator (if on desktop) */}
       <div className="w-full max-w-[480px] min-h-screen bg-slate-950 relative shadow-2xl flex flex-col">
         {/* Top Bar / Header */}
         <div className="h-14 flex items-center justify-between px-5 border-b border-white/5 bg-slate-950/50 backdrop-blur-sm sticky top-0 z-40">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gradient-to-tr from-cyan-500 to-purple-600 rounded-lg flex items-center justify-center font-black text-white italic text-lg shadow-[0_0_15px_rgba(6,182,212,0.4)]">
-              V
-            </div>
-            <span className="font-bold text-lg text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-400 tracking-tighter">
+          <div className="flex items-end gap-2">
+            <img 
+              src="/favicon.png" 
+              alt="VGOT Logo" 
+              className="w-8 h-8 object-contain" 
+            />
+            <span className="font-bold text-lg text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-400 tracking-tighter leading-none -mb-3">
               VGOT.AI
             </span>
           </div>
@@ -8241,5 +9381,6 @@ export default function App() {
         />
       </div>
     </div>
+    </LanguageContext.Provider>
   );
 }
