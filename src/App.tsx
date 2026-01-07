@@ -94,7 +94,7 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "history.empty": "No history",
     "video_insights.input.script": "ORIGINAL SCRIPT",
     "video_insights.input.visual": "REFERENCE VISUAL (OPTIONAL)",
-    "video_insights.placeholder.script": "Enter the script content you want to rewrite...",
+    "video_insights.placeholder.script": "Input product information...",
     "video_insights.upload.image_btn": "Upload Image",
     "video_insights.upload.drag_drop": "Drag & drop or click to upload",
     "video_insights.upload.or_paste": "OR PASTE LINK",
@@ -129,7 +129,7 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "superip.panel.uploading": "Uploading...",
     "nav.profile": "Profile",
     "profile.title": "Profile",
-    "profile.membership": "Membership",
+    "profile.membership": "User Credits",
     "profile.credits_left": "credits left",
     "profile.upgrade": "Upgrade Plan",
     "profile.menu.partner": "Partner Program",
@@ -149,6 +149,9 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "common.clear": "Clear",
     "common.copy": "Copy",
     "common.result": "RESULT",
+    "common.back": "BACK",
+    "common.next_step": "NEXT STEP",
+    "common.start_new": "START NEW",
     "history.title": "HISTORY",
     "history.filter.all": "ALL",
     "history.filter.video": "VIDEO",
@@ -166,11 +169,33 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "superip.prompt.clear": "Clear",
     "superip.prompt.generate": "GENERATE",
     "superip.generated_placeholder": "Generated image will appear here",
+    "superip.audio.title": "GENERATED AUDIO",
+    "superip.audio.no_audio": "No audio selected",
+    "superip.audio.placeholder": "Generated audio will appear here",
+    "superip.voice.waveform": "VOICE WAVEFORM",
+    "superip.voice.no_trial": "No trial generated",
+    "superip.voice.match": "Match",
+    "superip.voice.select": "SELECT VOICE",
+    "superip.voice.select_model": "Select Voice Model",
+    "superip.voice.cloning": "VOICE CLONING",
+    "superip.voice.select_file": "Select File (mp3/wav/m4a)",
+    "superip.voice.uploading": "Uploading...",
+    "superip.voice.ready": "Ready",
+    "superip.voice.uploaded": "Uploaded",
+    "superip.voice.file_limit": "10s~300s, ≤20MB",
+    "superip.voice.input_text": "INPUT TEXT",
+    "superip.voice.input_placeholder": "Enter text to convert to speech...",
+    "superip.result.title": "RESULT",
+    "superip.result.placeholder": "Generated video will appear here",
+    "superip.result.generating": "Generating...",
+    "superip.result.audio_placeholder": "Generated audio will appear here",
+    "superip.gen.clear": "Clear",
+    "superip.gen.generate": "GENERATE",
     "video_insights.title": "VIDEO INSIGHTS",
     "video_insights.desc": "Choose a goal to get actionable insights fast.",
-    "video_insights.mode.extract": "Extract",
-    "video_insights.mode.scene": "Scene",
-    "video_insights.mode.rewrite": "Rewrite",
+    "video_insights.mode.extract": "Extract Audio Script",
+    "video_insights.mode.scene": "Reverse Prompt",
+    "video_insights.mode.rewrite": "Viral Copy",
     "video_insights.upload.placeholder": "Drag & drop or click to upload",
     "video_insights.upload.paste_link": "OR PASTE LINK",
     "video_insights.upload.link_placeholder": "Paste video link (TikTok supported)",
@@ -204,9 +229,9 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "nav.history": "历史记录",
     "history.loading": "加载中...",
     "history.empty": "暂无记录",
-    "video_insights.input.script": "原脚本",
+    "video_insights.input.script": "产品信息",
     "video_insights.input.visual": "参考画面 (可选)",
-    "video_insights.placeholder.script": "输入您想要重写的脚本内容...",
+    "video_insights.placeholder.script": "输入产品信息",
     "video_insights.upload.image_btn": "上传图片",
     "video_insights.upload.drag_drop": "拖放或点击上传",
     "video_insights.upload.or_paste": "或粘贴链接",
@@ -241,7 +266,7 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "superip.panel.uploading": "上传中...",
     "nav.profile": "我的",
     "profile.title": "个人中心",
-    "profile.membership": "会员等级",
+    "profile.membership": "用户积分",
     "profile.credits_left": "剩余积分",
     "profile.upgrade": "升级套餐",
     "profile.menu.partner": "合伙人计划",
@@ -259,8 +284,12 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "common.confirm": "确认",
     "common.login": "登录",
     "common.clear": "清空",
+    "common.clear_gen": "清除",
     "common.copy": "复制",
     "common.result": "结果",
+    "common.back": "返回",
+    "common.next_step": "下一步",
+    "common.start_new": "重新开始",
     "history.title": "历史记录",
     "history.filter.all": "全部",
     "history.filter.video": "视频",
@@ -278,11 +307,33 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "superip.prompt.clear": "清空",
     "superip.prompt.generate": "生成",
     "superip.generated_placeholder": "生成的图片将显示在这里",
+    "superip.audio.title": "生成的音频",
+    "superip.audio.no_audio": "未选择音频",
+    "superip.audio.placeholder": "生成的音频将显示在这里",
+    "superip.voice.waveform": "语音波形",
+    "superip.voice.no_trial": "未生成试听",
+    "superip.voice.match": "匹配",
+    "superip.voice.select": "选择声音",
+    "superip.voice.select_model": "选择声音模型",
+    "superip.voice.cloning": "声音克隆",
+    "superip.voice.select_file": "选择文件 (mp3/wav/m4a)",
+    "superip.voice.uploading": "上传中...",
+    "superip.voice.ready": "就绪",
+    "superip.voice.uploaded": "已上传",
+    "superip.voice.file_limit": "10s~300s, ≤20MB",
+    "superip.voice.input_text": "输入文本",
+    "superip.voice.input_placeholder": "输入要转换为语音的文本...",
+    "superip.result.title": "结果",
+    "superip.result.placeholder": "生成的视频将显示在这里",
+    "superip.result.generating": "生成中...",
+    "superip.result.audio_placeholder": "生成的音频将显示在这里",
+    "superip.gen.clear": "清除",
+    "superip.gen.generate": "生成",
     "video_insights.title": "视频洞察",
     "video_insights.desc": "选择一个目标以快速获取可操作的洞察。",
-    "video_insights.mode.extract": "提取",
-    "video_insights.mode.scene": "场景",
-    "video_insights.mode.rewrite": "重写",
+    "video_insights.mode.extract": "提取音频文案",
+    "video_insights.mode.scene": "反推提示词",
+    "video_insights.mode.rewrite": "爆款文案",
     "video_insights.upload.placeholder": "拖放或点击上传",
     "video_insights.upload.paste_link": "或粘贴链接",
     "video_insights.upload.link_placeholder": "粘贴视频链接（支持TikTok）",
@@ -316,9 +367,9 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "nav.history": "歷史記錄",
     "history.loading": "載入中...",
     "history.empty": "暫無記錄",
-    "video_insights.input.script": "原腳本",
+    "video_insights.input.script": "產品信息",
     "video_insights.input.visual": "參考畫面 (可選)",
-    "video_insights.placeholder.script": "輸入您想要重寫的腳本內容...",
+    "video_insights.placeholder.script": "輸入產品信息",
     "video_insights.upload.image_btn": "上傳圖片",
     "video_insights.upload.drag_drop": "拖放或點擊上傳",
     "video_insights.upload.or_paste": "或粘貼鏈接",
@@ -353,7 +404,7 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "superip.panel.uploading": "上傳中...",
     "nav.profile": "我的",
     "profile.title": "個人中心",
-    "profile.membership": "會員等級",
+    "profile.membership": "用戶積分",
     "profile.credits_left": "剩餘積分",
     "profile.upgrade": "升級套餐",
     "profile.menu.partner": "合作夥伴計劃",
@@ -371,8 +422,12 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "common.confirm": "確認",
     "common.login": "登入",
     "common.clear": "清空",
+    "common.clear_gen": "清除",
     "common.copy": "複製",
     "common.result": "結果",
+    "common.back": "返回",
+    "common.next_step": "下一步",
+    "common.start_new": "重新開始",
     "history.title": "歷史記錄",
     "history.filter.all": "全部",
     "history.filter.video": "視頻",
@@ -390,11 +445,33 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "superip.prompt.clear": "清空",
     "superip.prompt.generate": "生成",
     "superip.generated_placeholder": "生成的圖片將顯示在這裡",
+    "superip.audio.title": "生成的音頻",
+    "superip.audio.no_audio": "未選擇音頻",
+    "superip.audio.placeholder": "生成的音頻將顯示在這裡",
+    "superip.voice.waveform": "語音波形",
+    "superip.voice.no_trial": "未生成試聽",
+    "superip.voice.match": "匹配",
+    "superip.voice.select": "選擇聲音",
+    "superip.voice.select_model": "選擇聲音模型",
+    "superip.voice.cloning": "聲音克隆",
+    "superip.voice.select_file": "選擇文件 (mp3/wav/m4a)",
+    "superip.voice.uploading": "上傳中...",
+    "superip.voice.ready": "就緒",
+    "superip.voice.uploaded": "已上傳",
+    "superip.voice.file_limit": "10s~300s, ≤20MB",
+    "superip.voice.input_text": "輸入文本",
+    "superip.voice.input_placeholder": "輸入要轉換為語音的文本...",
+    "superip.result.title": "結果",
+    "superip.result.placeholder": "生成的視頻將顯示在這裡",
+    "superip.result.generating": "生成中...",
+    "superip.result.audio_placeholder": "生成的音頻將顯示在這裡",
+    "superip.gen.clear": "清除",
+    "superip.gen.generate": "生成",
     "video_insights.title": "視頻洞察",
     "video_insights.desc": "選擇一個目標以快速獲取可操作的洞察。",
-    "video_insights.mode.extract": "提取",
-    "video_insights.mode.scene": "場景",
-    "video_insights.mode.rewrite": "重寫",
+    "video_insights.mode.extract": "提取音頻文案",
+    "video_insights.mode.scene": "反推提示詞",
+    "video_insights.mode.rewrite": "爆款文案",
     "video_insights.upload.placeholder": "拖放或點擊上傳",
     "video_insights.upload.paste_link": "或粘貼鏈接",
     "video_insights.upload.link_placeholder": "粘貼視頻鏈接（支持TikTok）",
@@ -444,7 +521,7 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "superip.panel.uploading": "アップロード中...",
     "nav.profile": "プロフィール",
     "profile.title": "プロフィール",
-    "profile.membership": "会員ランク",
+    "profile.membership": "ユーザークレジット",
     "profile.credits_left": "残りクレジット",
     "profile.upgrade": "プランをアップグレード",
     "profile.menu.partner": "パートナープログラム",
@@ -458,7 +535,13 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "common.cancel": "キャンセル",
     "common.confirm": "確認",
     "common.login": "ログイン",
+    "common.clear": "クリア",
+    "common.clear_gen": "クリア",
+    "common.copy": "コピー",
     "common.result": "結果",
+    "common.back": "戻る",
+    "common.next_step": "次のステップ",
+    "common.start_new": "新規作成",
     "history.title": "履歴",
     "history.filter.all": "すべて",
     "history.filter.video": "動画",
@@ -476,11 +559,36 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "superip.prompt.clear": "クリア",
     "superip.prompt.generate": "生成",
     "superip.generated_placeholder": "生成された画像がここに表示されます",
+    "superip.audio.title": "生成された音声",
+    "superip.audio.no_audio": "音声が選択されていません",
+    "superip.audio.placeholder": "生成された音声がここに表示されます",
+    "superip.voice.waveform": "音声波形",
+    "superip.voice.no_trial": "試聴が生成されていません",
+    "superip.voice.match": "マッチ",
+    "superip.voice.select": "音声を選択",
+    "superip.voice.select_model": "音声モデルを選択",
+    "superip.voice.cloning": "音声クローニング",
+    "superip.voice.select_file": "ファイルを選択 (mp3/wav/m4a)",
+    "superip.voice.uploading": "アップロード中...",
+    "superip.voice.ready": "準備完了",
+    "superip.voice.uploaded": "アップロード済み",
+    "superip.voice.file_limit": "10s~300s, ≤20MB",
+    "superip.voice.input_text": "テキスト入力",
+    "superip.voice.input_placeholder": "音声に変換するテキストを入力してください...",
+    "superip.result.title": "結果",
+    "superip.result.placeholder": "生成された動画がここに表示されます",
+    "superip.result.generating": "生成中...",
+    "superip.result.audio_placeholder": "生成された音声がここに表示されます",
+    "superip.gen.clear": "クリア",
+    "superip.gen.generate": "生成",
     "video_insights.title": "動画インサイト",
     "video_insights.desc": "目標を選択して、実行可能なインサイトを素早く取得します。",
-    "video_insights.mode.extract": "抽出",
-    "video_insights.mode.scene": "シーン",
-    "video_insights.mode.rewrite": "書き直し",
+    "video_insights.input.script": "製品情報",
+    "video_insights.input.visual": "参考画像 (任意)",
+    "video_insights.placeholder.script": "製品情報を入力してください...",
+    "video_insights.mode.extract": "音声スクリプト抽出",
+    "video_insights.mode.scene": "プロンプト逆生成",
+    "video_insights.mode.rewrite": "バズるコピー",
     "video_insights.upload.placeholder": "ドラッグ＆ドロップまたはクリックしてアップロード",
     "video_insights.upload.paste_link": "またはリンクを貼り付け",
     "video_insights.upload.link_placeholder": "動画リンクを貼り付け（TikTok対応）",
@@ -529,7 +637,7 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "superip.panel.uploading": "Subiendo...",
     "nav.profile": "Perfil",
     "profile.title": "Perfil",
-    "profile.membership": "Membresía",
+    "profile.membership": "Créditos de Usuario",
     "profile.credits_left": "créditos restantes",
     "profile.upgrade": "Mejorar Plan",
     "profile.menu.partner": "Programa de Socios",
@@ -543,7 +651,13 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "common.cancel": "Cancelar",
     "common.confirm": "Confirmar",
     "common.login": "Iniciar Sesión",
+    "common.clear": "Limpiar",
+    "common.clear_gen": "Limpiar",
+    "common.copy": "Copiar",
     "common.result": "RESULTADO",
+    "common.back": "VOLVER",
+    "common.next_step": "SIGUIENTE PASO",
+    "common.start_new": "EMPEZAR DE NUEVO",
     "history.title": "HISTORIAL",
     "history.filter.all": "TODO",
     "history.filter.video": "VIDEO",
@@ -561,11 +675,36 @@ export const translations: Record<LangKey, Record<string, string>> = {
     "superip.prompt.clear": "Borrar",
     "superip.prompt.generate": "GENERAR",
     "superip.generated_placeholder": "La imagen generada aparecerá aquí",
+    "superip.audio.title": "AUDIO GENERADO",
+    "superip.audio.no_audio": "No se seleccionó audio",
+    "superip.audio.placeholder": "El audio generado aparecerá aquí",
+    "superip.voice.waveform": "FORMA DE ONDA DE VOZ",
+    "superip.voice.no_trial": "No se generó prueba",
+    "superip.voice.match": "Coincidir",
+    "superip.voice.select": "SELECCIONAR VOZ",
+    "superip.voice.select_model": "Seleccionar Modelo de Voz",
+    "superip.voice.cloning": "CLONACIÓN DE VOZ",
+    "superip.voice.select_file": "Seleccionar Archivo (mp3/wav/m4a)",
+    "superip.voice.uploading": "Subiendo...",
+    "superip.voice.ready": "Listo",
+    "superip.voice.uploaded": "Subido",
+    "superip.voice.file_limit": "10s~300s, ≤20MB",
+    "superip.voice.input_text": "TEXTO DE ENTRADA",
+    "superip.voice.input_placeholder": "Ingrese el texto para convertir a voz...",
+    "superip.result.title": "RESULTADO",
+    "superip.result.placeholder": "El video generado aparecerá aquí",
+    "superip.result.generating": "Generando...",
+    "superip.result.audio_placeholder": "El audio generado aparecerá aquí",
+    "superip.gen.clear": "Limpiar",
+    "superip.gen.generate": "GENERAR",
     "video_insights.title": "INFORMACIÓN DE VIDEO",
     "video_insights.desc": "Elige un objetivo para obtener información procesable rápidamente.",
-    "video_insights.mode.extract": "Extraer",
-    "video_insights.mode.scene": "Escena",
-    "video_insights.mode.rewrite": "Reescribir",
+    "video_insights.input.script": "Información del producto",
+    "video_insights.input.visual": "Referencia visual (opcional)",
+    "video_insights.placeholder.script": "Introducir información del producto...",
+    "video_insights.mode.extract": "Extraer Guión de Audio",
+    "video_insights.mode.scene": "Prompt Inverso",
+    "video_insights.mode.rewrite": "Copy Viral",
     "video_insights.upload.placeholder": "Arrastra y suelta o haz clic para subir",
     "video_insights.upload.paste_link": "O PEGA EL ENLACE",
     "video_insights.upload.link_placeholder": "Pega el enlace del video (compatible con TikTok)",
@@ -708,6 +847,7 @@ const WorkspaceView = ({
   // Local-only state for showing user display name and credits
   const [wsName, setWsName] = useState<string | null>(null);
   const [wsCredits, setWsCredits] = useState<number | null>(null);
+  const [totalRecords, setTotalRecords] = useState<number>(0);
 
   useEffect(() => {
     // Read token from localStorage (set after successful login)
@@ -715,9 +855,12 @@ const WorkspaceView = ({
     if (!token) {
       setWsName(null);
       setWsCredits(null);
+      setTotalRecords(0);
       return;
     }
     const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || "";
+    
+    // Fetch user info
     fetch(`${API_BASE}/api/user/me`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -737,6 +880,20 @@ const WorkspaceView = ({
       .catch(() => {
         setWsName(null);
         setWsCredits(null);
+      });
+
+    // Fetch total history records count
+    fetch(`${API_BASE}/api/history/stats`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && typeof data.total_records === "number") {
+          setTotalRecords(data.total_records);
+        }
+      })
+      .catch(() => {
+        setTotalRecords(0);
       });
   }, []);
 
@@ -761,7 +918,7 @@ const WorkspaceView = ({
             <Video size={28} />
           </div>
           <span className="text-2xl font-bold text-white">
-            12
+            {totalRecords}
           </span>
           <span className="text-xs text-slate-400 uppercase tracking-wider">
             {t("workspace.projects")}
@@ -3831,7 +3988,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
     <div className="flex flex-col h-full pb-24 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <header className="mb-6">
         <h1 className="text-xl font-black text-white tracking-tight uppercase">
-          Create Super IP
+          {t("superip.title")}
         </h1>
       </header>
 
@@ -4107,13 +4264,13 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
             <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 space-y-4">
               <div className="space-y-2">
                 <label className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
-                  Enter Prompt
+                  {t("superip.prompt.title")}
                 </label>
                 <textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   className="w-full h-32 bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-[10px] text-white resize-none outline-none focus:border-cyan-500/50 placeholder:text-slate-600 transition-all"
-                  placeholder="Describe the character you want..."
+                  placeholder={t("superip.prompt.placeholder")}
                 />
               </div>
 
@@ -4126,7 +4283,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                   }}
                   className="px-4 py-2 rounded-lg border border-slate-700 text-slate-400 text-[10px] font-bold hover:bg-slate-800 transition-colors"
                 >
-                  Clear
+                  {t("superip.prompt.clear")}
                 </button>
                 <button
                   onClick={handleGenerateImage}
@@ -4142,7 +4299,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                     <>
                       <Zap size={14} />
                       <span>
-                        Generate
+                        {t("superip.prompt.generate")}
                           {typeof creditsCheckImage?.required_credits === "number" && creditsCheckImage.required_credits > 0
                             ? ` (${creditsCheckImage.required_credits} credits)`
                             : ""}
@@ -4183,7 +4340,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
               </div>
             ) : (
               <div className="bg-slate-900/40 border border-slate-800 rounded-xl min-h-[240px] flex flex-col items-center justify-center p-6 text-center gap-2">
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                <h3 className="text-[10px] font-bold text-white uppercase tracking-[0.2em]">
                   {t("common.result")}
                 </h3>
                 <p className="text-[10px] text-slate-500 font-medium">
@@ -4414,12 +4571,12 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
               </div>
               <div className="flex-1 min-w-0">
                 <div className="ui-tiny text-cyan-400 font-bold uppercase mb-0.5">
-                  Generated Audio
+                  {t("superip.audio.title")}
                 </div>
                 <div className="text-[8px] font-bold text-white truncate">
                   {selectedAudio
-                    ? (selectedAudio.name || "Audio selected")
-                    : "No audio selected"}
+                    ? (selectedAudio.name || t("superip.audio.no_audio"))
+                    : t("superip.audio.no_audio")}
                 </div>
               </div>
             </div>
@@ -4432,7 +4589,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
               {/* Voice Waveform - 显示区域，不是输入框 */}
               <div className="space-y-2">
                 <label className="text-[9px] uppercase text-slate-400 font-bold">
-                  Voice Waveform
+                  {t("superip.voice.waveform")}
                 </label>
                 <div className="flex gap-2 items-center">
                   {/* Waveform Display Area - matching时不收缩 */}
@@ -4461,7 +4618,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                         <div className="px-2 text-[10px] text-slate-300 truncate">Trial ready</div>
                       ) : (
                         <div className="px-2 text-[10px] text-slate-600 truncate">
-                          {analyzedPrompt ? "Prompt ready" : "No trial generated"}
+                          {analyzedPrompt ? "Prompt ready" : t("superip.voice.no_trial")}
                         </div>
                       )}
                     </div>
@@ -4526,7 +4683,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                   >
                     {/* Keep a stable layout; we overlay the spinner so it's never clipped or collapsed. */}
                     <span className={cn("transition-opacity", isGeneratingTrial ? "opacity-0" : "opacity-100")}>
-                      Match
+                      {t("superip.voice.match")}
                     </span>
                     {isGeneratingTrial && (
                       <span className="absolute inset-0 flex items-center justify-center opacity-100">
@@ -4543,7 +4700,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
               {/* Select Voice */}
               <div className="space-y-2">
                 <label className="text-[9px] uppercase text-slate-400 font-bold">
-                  Select Voice
+                  {t("superip.voice.select")}
                 </label>
                 <button
                   onClick={openVoiceModelDialog}
@@ -4561,7 +4718,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                       className="text-slate-500 group-hover:text-cyan-400 transition-colors"
                     />
                     <span className="ui-tiny font-bold">
-                      {overrideVoiceId ? `Selected: ${overrideVoiceId}` : "Select Voice Model"}
+                      {overrideVoiceId ? `Selected: ${overrideVoiceId}` : t("superip.voice.select_model")}
                     </span>
                   </span>
 
@@ -4586,7 +4743,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
               {/* Voice Cloning */}
               <div className="space-y-2">
                 <label className="text-[9px] uppercase text-slate-400 font-bold">
-                  Voice Cloning
+                  {t("superip.voice.cloning")}
                 </label>
                 <input
                   type="file"
@@ -4625,14 +4782,14 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-[10px] text-slate-300 font-bold truncate">
-                          {cloneFileId ? (cloneDisplayName || "clone.mp3") : "Select File (mp3/wav/m4a)"}
+                          {cloneFileId ? (cloneDisplayName || "clone.mp3") : t("superip.voice.select_file")}
                         </div>
                         <div className="micro-text text-slate-600 truncate">
                           {cloneUploading
-                            ? "Uploading..."
+                            ? t("superip.voice.uploading")
                             : cloneFileId
-                              ? (cloneAudioUrl ? "Ready" : "Uploaded")
-                              : "10s~300s, ≤20MB"}
+                              ? (cloneAudioUrl ? t("superip.voice.ready") : t("superip.voice.uploaded"))
+                              : t("superip.voice.file_limit")}
                         </div>
                       </div>
                     </div>
@@ -4782,7 +4939,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
               {/* Input Text */}
               <div className="space-y-2">
                 <label className="text-[9px] uppercase text-slate-400 font-bold">
-                  Input Text
+                  {t("superip.voice.input_text")}
                 </label>
                 <div className="relative group">
                   <textarea
@@ -4791,7 +4948,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                       setVoiceText(e.target.value)
                     }
                     className="w-full h-32 bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-[10px] text-white resize-none outline-none focus:border-cyan-500/50 placeholder:text-slate-600 transition-all"
-                    placeholder="Enter text to convert to speech..."
+                    placeholder={t("superip.voice.input_placeholder")}
                     maxLength={3500}
                   />
                   <span className="absolute bottom-2 right-2 micro-text text-slate-600">
@@ -4825,7 +4982,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                   }}
                   className="px-4 py-2 rounded-lg border border-slate-700 text-slate-400 text-[10px] font-bold hover:bg-slate-800 transition-colors"
                 >
-                  Clear
+                  {t("common.clear")}
                 </button>
                 <NeonButton
                   className="flex-1 py-2 text-[10px]"
@@ -4835,7 +4992,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                 >
                   <Zap size={14} />
                   <span>
-                    Generate
+                    {t("superip.prompt.generate")}
                     {typeof creditsCheckVoice?.required_credits === "number" && creditsCheckVoice.required_credits > 0
                       ? ` (${creditsCheckVoice.required_credits} credits)`
                       : ""}
@@ -4876,7 +5033,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                         </button>
 
                         <div className="min-w-0 flex-1">
-                          <div className="text-[10px] text-slate-300 font-bold truncate">Generated Audio</div>
+                          <div className="text-[10px] text-slate-300 font-bold truncate">{t("superip.audio.title")}</div>
                           <div className="mt-0.5 flex items-center gap-2">
                             <div className="text-[10px] text-slate-500 tabular-nums leading-none">
                               {formatTime(resultCurrentTime)} / {formatTime(resultDuration)}
@@ -4910,10 +5067,10 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
               ) : (
                 <>
                   <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">
-                    Result
+                    {t("superip.result.title")}
                   </span>
                   <p className="text-[10px] text-slate-500 font-medium">
-                    Generated audio will appear here
+                    {t("superip.result.audio_placeholder")}
                   </p>
                 </>
               )}
@@ -5146,11 +5303,11 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
             <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 space-y-4">
               <div className="space-y-2">
                 <label className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">
-                  Enter Prompt
+                  {t("superip.prompt.title")}
                 </label>
                 <textarea
                   className="w-full h-32 bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-[10px] text-white resize-none outline-none focus:border-cyan-500/50 placeholder:text-slate-600 transition-all"
-                  placeholder="Describe the character you want..."
+                  placeholder={t("superip.prompt.placeholder")}
                   value={superIpGenPrompt}
                   onChange={(e) => setSuperIpGenPrompt(e.target.value)}
                 />
@@ -5168,7 +5325,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                   onClick={clearSuperIpGen}
                   className="px-4 py-2 rounded-lg border border-slate-700 text-slate-400 text-[10px] font-bold hover:bg-slate-800 transition-colors"
                 >
-                  Clear
+                  {t("superip.gen.clear")}
                 </button>
                 {/* Diagonally split action button: Left=Generate (Main), Right=Pro (Option) */}
                 <div className="flex-[2] flex h-10 relative bg-transparent">
@@ -5198,7 +5355,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                     }}
                   >
                     <span>
-                      Generate
+                      {t("superip.gen.generate")}
                       {typeof creditsCheckGenCom?.required_credits === "number" && creditsCheckGenCom.required_credits > 0
                         ? ` (${creditsCheckGenCom.required_credits} credits)`
                         : ""}
@@ -5291,15 +5448,15 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                 </div>
               ) : (superIpTasks[0]?.status === 'processing') ? (
                 <div className="absolute inset-0 w-full h-full flex items-center justify-center z-10 bg-slate-900/80 backdrop-blur-sm">
-                  <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">Generating...</span>
+                  <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">{t("superip.result.generating")}</span>
                 </div>
               ) : (
                 <>
                   <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">
-                    Result
+                    {t("superip.result.title")}
                   </span>
                   <p className="text-[10px] text-slate-500 font-medium">
-                    Generated video will appear here
+                    {t("superip.result.placeholder")}
                   </p>
                 </>
               )}
@@ -5308,7 +5465,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
             {/* 3. History (Mini) */}
             <div className="pb-4">
               <span className="text-[8px] uppercase tracking-widest text-slate-400 font-bold mb-2 block">
-                History
+                {t("history.title")}
               </span>
               <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
                 {/* Render active tasks (excluding the very first one which is in main view) */}
@@ -5386,7 +5543,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
             onClick={() => setStep((s) => s - 1)}
             className="flex-1 py-2"
           >
-            Back
+            {t("common.back")}
           </NeonButton>
         )}
         <NeonButton
@@ -5396,7 +5553,7 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
           }
           className="flex-[2] py-2"
         >
-          {step === 3 ? "Start New" : "Next Step"}
+          {step === 3 ? t("common.start_new") : t("common.next_step")}
         </NeonButton>
       </div>
 
@@ -5657,17 +5814,6 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                   </div>
                 )}
               </div>
-              
-              {/* Bottom Close Button */}
-              <div className="flex-shrink-0 p-3 bg-slate-950/80 border-t border-slate-800/50">
-                <button
-                  onClick={() => setShowAudioGallery(false)}
-                  className="w-full py-3 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white font-medium text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
-                >
-                  <X size={18} />
-                  关闭音频库
-                </button>
-              </div>
             </motion.div>
           </>
         </AnimatePresence>,
@@ -5822,16 +5968,6 @@ Overall mood: calm, professional, trustworthy, and educational — like a medica
                     })()}
                   </div>
                 )}
-              </div>
-
-              <div className="flex-shrink-0 p-3 bg-slate-950/80 border-t border-slate-800/50">
-                <button
-                  onClick={() => setShowVoiceModelDialog(false)}
-                  className="w-full py-3 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white font-medium text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
-                >
-                  <X size={18} />
-                  关闭
-                </button>
               </div>
             </motion.div>
           </>
